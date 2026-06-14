@@ -1,0 +1,21 @@
+{
+  "instance_name": "korean-moshi-hf-backbone",
+  "hf_repo": "",
+
+  "lm_model_file": "/path/to/moshi_components.safetensors",
+  "backbone_model_file": "/path/to/hf_backbone.safetensors",
+  "adapter_model_file": "/path/to/dimension_adapter.safetensors",
+
+  "text_tokenizer_file": "/path/to/tokenizer.model",
+  "log_dir": "./logs",
+
+  "mimi_model_file": "/path/to/mimi.safetensors",
+  "mimi_num_codebooks": 8,
+
+  "backend_type": "hf_backbone",
+
+  "static_dir": "../../client/dist",
+  "addr": "0.0.0.0",
+  "port": 8999,
+  "cert_dir": "."
+}

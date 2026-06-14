@@ -1038,7 +1038,7 @@ dialogue_001.wav
 ### 8.2 관련 파일 위치
 
 ```
-k-moshi-finetune/
+moshi-korean-finetune/
 ├── data_preparation/
 │   ├── aligners/
 │   │   └── nfa_aligner.py          # NFA Aligner 구현
@@ -1046,7 +1046,7 @@ k-moshi-finetune/
 ├── docs/
 │   ├── K-MOSHI_SYNTHETIC_DIALOGUE_GUIDE.md     # 기존 가이드
 │   └── K-MOSHI_DIALOGUE_GENERATION_DETAILED.md # 이 문서
-└── CLAUDE.md                       # 프로젝트 전체 가이드
+└── README.md                       # 프로젝트 전체 가이드
 ```
 
 ---

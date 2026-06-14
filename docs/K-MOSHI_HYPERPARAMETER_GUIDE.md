@@ -863,7 +863,7 @@ moshi-finetune (Official)
 ├── finetune/args.py           # 하이퍼파라미터 정의
 └── train.py                   # 학습 루프
 
-k-moshi-finetune (This Project)
+moshi-korean-finetune (This Project)
 ├── finetune/scheduler.py      # Two-rate optimizer 구현
 ├── finetune/args.py           # 확장된 설정 옵션
 └── example/korean_v4_*.yaml   # 한국어 설정 파일들

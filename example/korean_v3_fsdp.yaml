@@ -40,7 +40,7 @@ data:
 # -----------------------------------------------------------------------------
 moshi_paths:
   hf_repo_id: null
-  moshi_path: 'k-moshi-finetune/models/tokenizer_spe_unigram_v32000_max_500_pad_bos_eos/tokenizer.model'
+  moshi_path: '/path/to/tokenizer.model'
   mimi_path: '/path/to/model'
   tokenizer_path: '/path/to/model'
   config_path: '/path/to/model'

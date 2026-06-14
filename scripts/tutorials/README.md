@@ -232,7 +232,7 @@ scripts/tutorials/
        --moshi-weights /path/to/consolidated.safetensors
    ```
 
-자세한 내용은 프로젝트 루트의 `CLAUDE.md`를 참조하세요.
+자세한 내용은 프로젝트 루트의 `README.md`를 참조하세요.
 
 ## 문제 해결
 

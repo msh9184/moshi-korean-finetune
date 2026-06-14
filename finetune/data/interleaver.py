@@ -1790,7 +1790,7 @@ class StereoInterleavedTokenizer:
     Note:
         - LEFT channel (wav[0]) = Moshi/AI voice (SPEAKER_MAIN)
         - RIGHT channel (wav[1]) = User voice
-        - This matches K-Moshi data format from CLAUDE.md
+        - This matches K-Moshi data format (see docs/)
 
     Unified Filtering Pipeline (5 Layers):
         Layer 1: Case Control - Structural validity (allow_case1..5)

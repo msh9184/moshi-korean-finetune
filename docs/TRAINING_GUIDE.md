@@ -27,7 +27,7 @@ Korean Moshi 파인튜닝을 위한 완전 가이드입니다.
 ```bash
 # GPU 서버에 코드 동기화
 rsync -avz --exclude '.git' --exclude '__pycache__' \
-    /path/to/k-moshi-finetune/ \
+    /path/to/moshi-korean-finetune/ \
     user@gpu-server:/path/to
 
 # GPU 서버 접속
@@ -355,7 +355,7 @@ korean:
 
 ## 참고 자료
 
-- [K-Moshi Implementation Plan](../K-MOSHI-IMPLEMENTATION-PLAN.md)
+- [K-Moshi Implementation Plan](../README.md)
 - [Data Preparation Guide](../data_preparation/README.md)
 - [Moshi Paper](https://arxiv.org/abs/2410.00037)
 - [Original moshi-finetune](https://github.com/kyutai-labs/moshi-finetune)

@@ -898,7 +898,7 @@ max_steps: 10000
 ### 5.5 File Structure Summary
 
 ```
-k-moshi-finetune/
+moshi-korean-finetune/
 ├── finetune/
 │   ├── backbone/
 │   │   └── lm_model_wrapper.py    # ✅ Speaker conditioning integrated

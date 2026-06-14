@@ -56,7 +56,7 @@ for cb_index in range(self.num_audio_codebooks):  # = n_q = 8
 
 ### 2.2 Original Moshi 추론 방식 (Rust Backend)
 
-**`k-moshi/rust/moshi-core/src/lm_generate_multistream.rs`** (line 25-35):
+**`serving/rust/moshi-core/src/lm_generate_multistream.rs`** (line 25-35):
 ```rust
 pub fn v0_1() -> Self {
     Self {
@@ -67,7 +67,7 @@ pub fn v0_1() -> Self {
 }
 ```
 
-**`k-moshi/rust/moshi-core/src/lm.rs`** (line 247, 852-855):
+**`serving/rust/moshi-core/src/lm.rs`** (line 247, 852-855):
 ```rust
 // v0_1_streaming: audio_codebooks = 16
 s.audio_codebooks = 16;

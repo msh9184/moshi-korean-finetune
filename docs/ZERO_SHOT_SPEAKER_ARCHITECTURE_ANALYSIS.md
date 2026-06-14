@@ -328,7 +328,7 @@ return ConditionAttributes(text=text, tensor=tensors)
 #### 4.1.2 구현 코드 스케치
 
 ```python
-# k-moshi-finetune/finetune/speaker_encoder.py
+# moshi-korean-finetune/finetune/speaker_encoder.py
 
 import torch
 import torch.nn as nn

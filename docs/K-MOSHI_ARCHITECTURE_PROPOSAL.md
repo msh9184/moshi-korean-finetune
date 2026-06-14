@@ -553,7 +553,7 @@ immediate_actions:
 ### 8.2 관련 문서
 - `docs/FULL_DUPLEX_ARCHITECTURE_ANALYSIS.md` - 상세 아키텍처 분석
 - `docs/TRAINING_RECIPE_ANALYSIS_KO.md` - 학습 레시피 분석
-- `CLAUDE.md` - 프로젝트 가이드
+- `README.md` - 프로젝트 가이드
 
 ### 8.3 코드 참조
 - `moshi/moshi/models/lm.py` - Moshi LM 구현

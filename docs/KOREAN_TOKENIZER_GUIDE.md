@@ -204,8 +204,8 @@ moshi_paths:
 | `tools/convert_hf_lm_to_sentencepiece.py` | BBPE→SP 변환 시도 (실패 기록) |
 | `docs/BBPE_TO_SENTENCEPIECE_ANALYSIS.md` | BBPE vs SP 분석 문서 |
 | `finetune/data/interleaver.py` | 토크나이저 사용처 |
-| `k-moshi/moshi/moshi/models/lm.py` | LMModel text 관련 layer |
-| `k-moshi/moshi/moshi/models/loaders.py` | 토크나이저 로딩 로직 |
+| `serving/moshi/moshi/models/lm.py` | LMModel text 관련 layer |
+| `serving/moshi/moshi/models/loaders.py` | 토크나이저 로딩 로직 |
 
 ---
 

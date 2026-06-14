@@ -992,7 +992,7 @@ def train_step_zero_shot(
 
 - `moshi/moshi/models/lm.py` - LMModel, forward_text, forward_depformer_training
 - `moshi/moshi/conditioners/base.py` - ConditionFuser, ConditionProvider
-- `k-moshi-finetune/finetune/data/interleaver.py` - Data pipeline
+- `moshi-korean-finetune/finetune/data/interleaver.py` - Data pipeline
 
 ---
 

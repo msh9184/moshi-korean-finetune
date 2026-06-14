@@ -1,0 +1,13 @@
+{
+  "instance_name": "korean-moshi",
+  "hf_repo": "",
+  "lm_model_file": "/path/to/korean-moshi-fused.safetensors",
+  "text_tokenizer_file": "/path/to/tokenizer.model",
+  "log_dir": "./logs",
+  "mimi_model_file": "/path/to/mimi.safetensors",
+  "mimi_num_codebooks": 8,
+  "static_dir": "../../client/dist",
+  "addr": "0.0.0.0",
+  "port": 8998,
+  "cert_dir": "."
+}

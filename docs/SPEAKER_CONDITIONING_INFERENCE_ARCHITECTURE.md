@@ -537,7 +537,7 @@ def save_samples(
 ### 6.2 Frontend Code Example (TypeScript)
 
 ```typescript
-// k-moshi/client/src/lib/speakerReference.ts
+// serving/client/src/lib/speakerReference.ts
 
 interface SpeakerReferenceRequest {
   type: 'SpeakerReference';

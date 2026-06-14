@@ -120,7 +120,7 @@ For Moshi speech-text alignment:
 ### 4.1 Script Location
 
 ```
-k-moshi-finetune/
+moshi-korean-finetune/
 └── tools/
     └── convert_hf_lm_to_sentencepiece.py  # Production converter
 ```

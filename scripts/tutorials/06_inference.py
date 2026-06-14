@@ -395,7 +395,7 @@ def main():
   4. Rust 서버 배포
      - 파인튜닝된 모델로 실시간 서비스
 
-  💡 도움이 필요하면 CLAUDE.md를 참조하세요!
+  💡 도움이 필요하면 README.md를 참조하세요!
 """)
 
     if latest_ckpt:
