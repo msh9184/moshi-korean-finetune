@@ -1,0 +1,144 @@
+# =============================================================================
+# K-Moshi Training Configuration - Moshi Backbone (Default)
+# =============================================================================
+#
+# This configuration uses the original Moshi backbone (7B parameters).
+# Recommended for:
+#   - Production training
+#   - Stable, tested architecture
+#   - Full compatibility with existing moshi-finetune code
+#
+# Backbone: Moshi StreamingTransformer
+#   - d_model: 4096
+#   - num_layers: 32
+#   - num_heads: 32 (MHA, no GQA)
+#   - dim_feedforward: 16384
+#
+# =============================================================================
+
+# Data configuration
+data:
+  train_data: '/path/to/korean_train.jsonl'
+  eval_data: '/path/to/korean_eval.jsonl'
+  shuffle: true
+
+# Model paths
+moshi_paths:
+  hf_repo_id: "kyutai/moshiko-pytorch-bf16"
+
+# =============================================================================
+# BACKBONE CONFIGURATION (Phase 2)
+# =============================================================================
+# This is the new modular backbone configuration.
+# For now, only "moshi" type is fully supported.
+# "hf_lm" will be available in Phase 3.
+#
+backbone:
+  # Backbone type: "moshi" (default), "hf_lm" (Phase 3), "custom"
+  type: "moshi"
+
+  # Moshi-specific settings (used when type="moshi")
+  moshi:
+    hidden_dim: 4096
+    num_layers: 32
+    num_heads: 32
+    max_seq_len: 4096
+    gradient_checkpointing: true
+
+    # Moshi-specific options
+    dim_feedforward: 16384
+    positional_embedding: "rope"
+    rope_base: 10000.0
+    causal: true
+
+  # HFLM settings (for reference, not used when type="moshi")
+  hf_lm:
+    model_path: ""
+    hidden_dim: 3072
+    num_layers: 30
+    num_heads: 24
+    num_key_value_heads: 4
+
+  # Dimension adapter (not needed for Moshi, both are 4096)
+  dimension_adapter:
+    enable: false
+    moshi_dim: 4096
+
+# =============================================================================
+# Training Configuration
+# =============================================================================
+
+# Sequence and batch settings
+duration_sec: 90
+batch_size: 4
+num_microbatches: 4
+
+# Training steps
+max_steps: 10000
+
+# Loss weights
+first_codebook_weight_multiplier: 100.0
+text_padding_weight: 0.5
+
+# LoRA configuration
+full_finetuning: false
+lora:
+  enable: true
+  rank: 128
+  scaling: 2.0
+  ft_embed: true
+
+# Optimizer
+optim:
+  lr: 2.e-5
+  depformer_lr: null  # Same as lr
+  weight_decay: 0.1
+  beta1: 0.9
+  beta2: 0.95
+
+# Scheduler
+scheduler:
+  type: "cosine_warmup"
+  warmup_steps: 500
+  min_lr: 1.e-7
+
+# Distributed training
+distributed_backend: "fsdp"
+gradient_checkpointing: true
+
+# Precision
+param_dtype: "bfloat16"
+
+# Checkpointing
+checkpoint:
+  enabled: true
+  save_freq: 1000
+  max_keep: 5
+  metric_type: "eval_loss"
+  resume_if_exist: true
+
+# Logging
+log_freq: 10
+eval_freq: 500
+do_eval: true
+
+wandb:
+  project: "k-moshi"
+  offline: true
+  run_name: "korean-moshi-backbone"
+
+tensorboard:
+  enabled: true
+
+# Output directory
+run_dir: "/path/to/runs/korean_moshi_v1"
+overwrite_run_dir: false
+seed: 42
+
+# Korean finetuning
+korean:
+  enable_user_stream: false
+  full_duplex_input: true
+  interleaver:
+    keep_main_only: true
+    character_level_interpolation: true

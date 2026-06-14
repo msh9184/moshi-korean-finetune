@@ -1,0 +1,253 @@
+# =============================================================================
+# K-Moshi Training Configuration - HFLM Backbone (Phase 3)
+# =============================================================================
+#
+# ⚠️ WARNING: This configuration is for Phase 3 implementation.
+# The HFLM backbone is NOT yet fully implemented.
+# Using this configuration will raise NotImplementedError.
+#
+# This file serves as:
+#   1. Documentation of the target HFLM integration
+#   2. Reference for Phase 3 implementation
+#   3. Template for future custom backbone configurations
+#
+# Backbone: a Hugging Face causal LM (Mistral-based)
+#   - d_model: 3072
+#   - num_layers: 30
+#   - num_heads: 24 (GQA: 24 heads, 4 KV heads)
+#   - intermediate_size: 8192
+#   - RoPE theta: 500000
+#
+# Key Differences from Moshi:
+#   - Smaller dimension: 3072 vs 4096
+#   - GQA: 24/4 = 6x KV head repetition
+#   - Fewer layers: 30 vs 32
+#   - Sliding window attention
+#   - Requires DimensionAdapter for Moshi compatibility
+#
+# =============================================================================
+
+# Data configuration
+data:
+  train_data: '/path/to/korean_train.jsonl'
+  eval_data: '/path/to/korean_eval.jsonl'
+  shuffle: true
+
+# Model paths
+# Note: For HFLM, moshi_paths is still used for Mimi encoder and tokenizer
+moshi_paths:
+  hf_repo_id: "kyutai/moshiko-pytorch-bf16"
+  # Mimi encoder will be loaded from here
+  # Tokenizer can be overridden in korean.korean_tokenizer_path
+
+# =============================================================================
+# BACKBONE CONFIGURATION - HFLM (Phase 3)
+# =============================================================================
+#
+# Architecture when using HFLM:
+#
+#   codes [B, 9, T]
+#        │
+#        ▼
+#   ┌─────────────────────────────────┐
+#   │ Embeddings (from Moshi, d=4096) │
+#   └─────────────────────────────────┘
+#        │
+#        ▼
+#   ┌─────────────────────────────────┐
+#   │ DimensionAdapter.input_proj     │
+#   │   Linear(4096 → 3072)           │
+#   └─────────────────────────────────┘
+#        │
+#        ▼
+#   ┌─────────────────────────────────┐
+#   │ HFLMBackbone                  │
+#   │   - 30 layers                   │
+#   │   - 24 heads (GQA: 4 KV heads)  │
+#   │   - d_model: 3072               │
+#   └─────────────────────────────────┘
+#        │
+#        ▼
+#   ┌─────────────────────────────────┐
+#   │ DimensionAdapter.output_proj    │
+#   │   Linear(3072 → 4096)           │
+#   └─────────────────────────────────┘
+#        │
+#        ▼
+#   ┌─────────────────────────────────┐
+#   │ Depformer + Linears (d=4096)    │
+#   └─────────────────────────────────┘
+#        │
+#        ▼
+#   logits [B, dep_q, T, vocab]
+#
+backbone:
+  # Backbone type: "hf_lm" for a Hugging Face causal LM
+  type: "hf_lm"
+
+  # Moshi settings (not used when type="hf_lm", but kept for reference)
+  moshi:
+    hidden_dim: 4096
+    num_layers: 32
+    num_heads: 32
+
+  # HFLM-specific settings
+  hf_lm:
+    # Path to HuggingFace model or local directory
+    # Example: "mistralai/Mistral-7B-Instruct-v0.3" or "/local/path/HF-causal-LM"
+    model_path: "/path/to/HF-causal-LM"
+
+    # Architecture parameters
+    hidden_dim: 3072
+    num_layers: 30
+    num_heads: 24
+    num_key_value_heads: 4  # GQA: 24/4 = 6x repetition
+    intermediate_size: 8192
+    max_seq_len: 32768
+
+    # RoPE configuration
+    rope_theta: 500000.0
+    rope_scaling: null  # For extended context, configure here
+
+    # Sliding window attention
+    use_sliding_window: true
+    sliding_window: 4096
+
+    # Other settings
+    hidden_act: "silu"
+    rms_norm_eps: 1.e-6
+    tie_word_embeddings: false
+
+    # Loading options
+    load_pretrained: true
+    trust_remote_code: true
+
+  # Dimension adapter configuration (REQUIRED for HFLM)
+  # Bridges the 3072 ↔ 4096 dimension gap
+  dimension_adapter:
+    enable: true
+    moshi_dim: 4096      # Moshi embedding/depformer dimension (fixed)
+    backbone_dim: 3072   # HFLM dimension (auto-detected if null)
+
+    # Projection layer settings
+    bias: false          # No bias in projections (matches Moshi style)
+    init_method: "xavier"  # Weight initialization: xavier, kaiming, normal, orthogonal
+
+    # Residual connection (experimental)
+    # Set > 0 for residual bypass (can help with training stability)
+    residual_scale: 0.0
+
+# =============================================================================
+# Training Configuration
+# =============================================================================
+
+# Sequence and batch settings
+# Note: HFLM may support longer sequences due to sliding window attention
+duration_sec: 90
+batch_size: 4
+num_microbatches: 4
+
+# Training steps
+max_steps: 10000
+
+# Loss weights
+first_codebook_weight_multiplier: 100.0
+text_padding_weight: 0.5
+
+# LoRA configuration
+# Note: LoRA will be applied to HFLM backbone
+full_finetuning: false
+lora:
+  enable: true
+  rank: 128
+  scaling: 2.0
+  ft_embed: true  # Also finetune embeddings (important for Korean)
+
+# Optimizer
+optim:
+  lr: 2.e-5
+  depformer_lr: null
+  weight_decay: 0.1
+  beta1: 0.9
+  beta2: 0.95
+
+# Scheduler
+scheduler:
+  type: "cosine_warmup"
+  warmup_steps: 500
+  min_lr: 1.e-7
+
+# Distributed training
+# Note: FSDP may require special handling for HFLM
+distributed_backend: "fsdp"
+gradient_checkpointing: true
+
+# Precision
+param_dtype: "bfloat16"
+
+# Checkpointing
+checkpoint:
+  enabled: true
+  save_freq: 1000
+  max_keep: 5
+  metric_type: "eval_loss"
+  resume_if_exist: true
+
+# Logging
+log_freq: 10
+eval_freq: 500
+do_eval: true
+
+wandb:
+  project: "k-moshi-hf_lm"
+  offline: true
+  run_name: "korean-hf_lm-backbone"
+
+tensorboard:
+  enabled: true
+
+# Output directory
+run_dir: "/path/to/runs/korean_hf_lm_v1"
+overwrite_run_dir: false
+seed: 42
+
+# Korean finetuning
+korean:
+  enable_user_stream: false
+  full_duplex_input: true
+
+  # Use HFLM tokenizer for Korean text
+  # HF-causal-LM has 105900 vocab size
+  korean_tokenizer_path: "/path/to/HF-causal-LM"
+  korean_tokenizer_type: "hf_lm"
+
+  interleaver:
+    keep_main_only: true
+    character_level_interpolation: true
+
+# =============================================================================
+# Phase 3 Implementation Notes
+# =============================================================================
+#
+# To implement HFLM backbone:
+#
+# 1. Create finetune/backbone/hf_lm_backbone.py:
+#    - Implement HFLMBackbone(AbstractBackbone)
+#    - Support HuggingFace transformers loading
+#    - Implement streaming mode with KV cache
+#
+# 2. Update finetune/backbone/factory.py:
+#    - Implement _create_hf_lm_backbone()
+#    - Handle HuggingFace model loading
+#
+# 3. Implement LMModelWrapper.from_config():
+#    - Extract embeddings/depformer/linears from base Moshi model
+#    - Create HFLMBackbone from config
+#    - Assemble wrapper with dimension adapter
+#
+# 4. Test with small dataset:
+#    - Verify forward pass works
+#    - Check gradient flow through adapter
+#    - Compare loss curves with Moshi backbone
+#
+# =============================================================================

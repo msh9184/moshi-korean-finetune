@@ -1,0 +1,51 @@
+# Requirements for data_preparation pipeline
+# Install: pip install -r data_preparation/requirements.txt
+
+# ==============================================================================
+# Phase 1 (CPU) Dependencies
+# ==============================================================================
+pyyaml>=6.0
+tqdm>=4.64
+soundfile>=0.12
+scipy>=1.10
+numpy>=1.24
+
+# ==============================================================================
+# Phase 2 (GPU) Dependencies - NFA Aligner
+# ==============================================================================
+# NeMo ASR toolkit for Korean CTC models
+# Note: Install with CUDA support for GPU acceleration
+nemo_toolkit[asr]>=1.21
+
+# CTC segmentation for forced alignment
+# Package name is ctc-segmentation (hyphen), import as ctc_segmentation (underscore)
+ctc-segmentation>=1.7
+
+# PyTorch (should match CUDA version on your system)
+# Already in main pyproject.toml, but listed for completeness
+# torch>=2.0
+
+# ==============================================================================
+# Phase 2 (GPU) Dependencies - Whisper Aligner (Alternative)
+# ==============================================================================
+# whisper-timestamped (already in main pyproject.toml)
+# whisper_timestamped
+
+# ==============================================================================
+# Optional: Audio processing utilities
+# ==============================================================================
+librosa>=0.10
+pydub>=0.25
+
+# ==============================================================================
+# Installation Notes
+# ==============================================================================
+# For A100 80GB with CUDA 12.x:
+#   pip install torch==2.2.0 --index-url https://download.pytorch.org/whl/cu121
+#   pip install nemo_toolkit[asr]
+#   pip install ctc-segmentation
+#
+# For proxy/network restricted environments:
+#   1. Download models locally on a machine with network access
+#   2. Copy to GPU server
+#   3. Use --nfa-model /path/to/local/model

@@ -1,0 +1,164 @@
+# =============================================================================
+# K-Moshi Phase 1 Korean Finetuning Configuration (FSDP + mpirun)
+# =============================================================================
+#
+# Phase 1: Moshi LLM with Moshiko vocabulary (SentencePiece 32K)
+#
+# This configuration enables full finetuning using the AIHub broadcast dataset
+# processed by data_preparation pipeline.
+#
+# Prerequisites:
+#   1. Process dataset with data_preparation Phase 1 & 2:
+#      python -m data_preparation.scripts.run_phase1 --parallel
+#      python -m data_preparation.scripts.run_phase2 --machine-id 0 --total-machines 8
+#
+#   2. Download Moshi models:
+#      python scripts/download_models.py --output-dir /path/to/model
+#
+#   3. Create training JSONL:
+#      python scripts/prepare_training_data.py \
+#          --input-dir /path/to/data \
+#          --output-jsonl ./data/korean_phase1.jsonl
+#
+# Usage:
+#   # FSDP with mpirun (recommended)
+#   mpirun -np 4 python -m train example/korean_phase1_fsdp.yaml
+#
+#   # FSDP with torchrun
+#   torchrun --nproc-per-node 4 -m train example/korean_phase1_fsdp.yaml
+#
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Data Configuration
+# -----------------------------------------------------------------------------
+data:
+  # Training data JSONL (created by scripts/prepare_training_data.py)
+  # Format: {"path": "/abs/path/to/audio.wav", "duration": 45.32}
+  train_data: './data/korean_phase1.jsonl'
+
+  # Evaluation data (optional)
+  eval_data: ''
+
+  # Shuffle training data
+  shuffle: true
+
+# -----------------------------------------------------------------------------
+# Model Paths
+# -----------------------------------------------------------------------------
+# Use local model files (recommended for GPU cluster)
+# Download with: python scripts/download_models.py --output-dir /path/to/model
+moshi_paths:
+  hf_repo_id: null  # Set to null to use local paths
+  moshi_path: '/path/to/model'
+  mimi_path: '/path/to/model'
+  tokenizer_path: '/path/to/model'
+  config_path: '/path/to/model'
+
+# -----------------------------------------------------------------------------
+# Korean Finetuning Configuration
+# -----------------------------------------------------------------------------
+korean:
+  # Phase 1: Disable user stream (mono training, 9 codebooks)
+  # This uses the standard InterleavedTokenizer
+  enable_user_stream: false
+
+  # Not using pre-initialized model for Phase 1
+  initialized_model_path: null
+
+  # Phase 1: Use default Moshiko tokenizer (SentencePiece 32K)
+  # In Phase 2, you can switch to KLUE BERT with:
+  #   korean_tokenizer_path: '/path/to/model'
+  #   korean_tokenizer_type: 'klue'
+  korean_tokenizer_path: null
+  korean_tokenizer_type: 'sentencepiece'
+
+  # Token IDs to retain (not used in Phase 1)
+  retain_token_ids: [0, 3, 32000]
+
+# -----------------------------------------------------------------------------
+# Training Mode Configuration
+# -----------------------------------------------------------------------------
+# Full finetuning (train all parameters)
+full_finetuning: true
+
+# LoRA must be disabled for full finetuning
+lora:
+  enable: false
+  rank: 64
+  scaling: 2.0
+  ft_embed: false
+
+# Distributed training backend
+# - fsdp: FullyShardedDataParallel - shards model across GPUs, lower memory
+# - ddp: DistributedDataParallel - replicates full model, needs more memory
+distributed_backend: fsdp
+
+# -----------------------------------------------------------------------------
+# Loss Configuration
+# -----------------------------------------------------------------------------
+# Weight multiplier for first codebook (semantic tokens)
+# Higher weight emphasizes semantic content over acoustic details
+first_codebook_weight_multiplier: 100.0
+
+# Weight for text padding tokens (reduce to focus on actual text)
+text_padding_weight: 0.5
+
+# -----------------------------------------------------------------------------
+# Training Hyperparameters
+# -----------------------------------------------------------------------------
+# Sequence duration in seconds
+# Affects memory usage: longer = more memory, but better context
+duration_sec: 60
+
+# Batch size per GPU (A100 80GB can handle 2-4 with duration_sec=60)
+batch_size: 2
+
+# Gradient accumulation steps
+# Effective batch size = batch_size * num_microbatches * num_gpus
+num_microbatches: 4
+
+# Total training steps
+max_steps: 10000
+
+# Gradient clipping (prevents exploding gradients)
+max_norm: 1.0
+
+# Gradient checkpointing (saves memory at cost of compute)
+gradient_checkpointing: true
+
+# Optimizer settings
+optim:
+  lr: 1.0e-5  # Lower LR for full finetuning (1e-5 to 5e-6 recommended)
+  weight_decay: 0.1
+  pct_start: 0.05  # 5% warmup
+
+# Mixed precision (bfloat16 recommended for A100)
+param_dtype: bfloat16
+
+# -----------------------------------------------------------------------------
+# Checkpointing & Logging
+# -----------------------------------------------------------------------------
+seed: 42
+log_freq: 10
+eval_freq: 500
+do_eval: false
+
+# Checkpoint configuration
+do_ckpt: true
+ckpt_freq: 500
+save_adapters: false  # Must be false for full finetuning
+num_ckpt_keep: 3
+
+# Output directory for checkpoints and logs
+run_dir: './runs/korean_phase1_v1'
+overwrite_run_dir: false
+
+# -----------------------------------------------------------------------------
+# Weights & Biases (Optional)
+# -----------------------------------------------------------------------------
+wandb:
+  project: 'k-moshi'
+  run_name: 'phase1-moshiko-vocab-fsdp'
+  offline: true  # Set to false for online logging
+  # key: ''  # Your W&B API key

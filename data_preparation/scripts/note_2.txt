@@ -1,0 +1,184 @@
+
+● All files pass syntax check. Let me update the todo list to mark the task as completed.
+
+● All enhancements for speaker ID tagging in word-level timestamps are complete. Here's a summary of the changes made:
+
+  Summary of Changes
+
+  1. data_preparation/config.py
+
+  - Added extended_alignments_dir property for storing extended format alignments
+
+  2. data_preparation/orchestrators/phase1_cpu.py (from previous work)
+
+  - Enhanced segment structure to include original_speaker_id for each segment
+
+  3. data_preparation/aligners/nfa_aligner.py
+
+  - Enhanced SegmentInfo with: original_speaker_id, channel
+  - Enhanced WordTimestamp with: original_speaker_id, channel, segment_index
+  - Added to_extended_format() method for full metadata output
+  - Updated ConversationAlignment class:
+    - Added to_extended_format() - returns full speaker metadata
+    - Added save_extended_format() - saves extended JSON
+    - Added save_detailed_extended_format() - per-speaker extended files
+
+  4. data_preparation/writers/moshi_format.py
+
+  - Enhanced ManifestEntry with alignment and alignment_extended paths
+  - Added to_extended_dict() and to_extended_json() methods
+  - Added get_extended_alignment_path() and get_moshi_alignment_path() methods
+  - Added write_conversation_alignment() for both Moshi and extended formats
+  - Updated get_statistics() to include extended alignment counts
+
+  5. data_preparation/scripts/merge_phase2_results.py
+
+  - Added check_extended parameter to validate_entry()
+  - Updated write_merged_manifest() to include extended alignment paths
+
+  Extended Format Output Example
+
+  {
+    "conversation_id": "conv_000001",
+    "format_version": "2.0",
+    "metadata": {
+      "total_words": 150,
+      "unique_original_speakers": ["spk_001", "spk_002", "spk_003"],
+      "speaker_statistics": {...}
+    },
+    "alignments": [
+      {
+        "word": "안녕하세요",
+        "start": 0.5,
+        "end": 1.2,
+        "confidence": 0.95,
+        "speaker_role": "SPEAKER_MAIN",
+        "original_speaker_id": "spk_001",
+        "channel": 0,
+        "segment_index": 0
+      },
+      ...
+    ],
+    "moshi_format": [["안녕하세요", [0.5, 1.2], "SPEAKER_MAIN"], ...]
+  }
+
+  This provides backward compatibility with Moshi training format while preserving rich speaker metadata for future multi-speaker diarization analysis.
+
+
+
+
+
+
+
+● 이제 문법 검사를 수행합니다.
+
+● Bash(python -m py_compile data_preparation/scripts/migrate_speaker_ids.py data_preparation/processors/segment_aligner.py 2>&1)
+  ⎿  (No content)
+
+● ---
+  ✅ Option B 마이그레이션 솔루션 완료
+
+  생성된 파일 및 수정 사항
+
+  1. 새 마이그레이션 스크립트
+
+  data_preparation/scripts/migrate_speaker_ids.py
+
+  ┌─────────────────────────────────────────────────────────────────┐
+  │  Phase 1 Segment Alignment  +  Lhotse Source Data              │
+  │        (기존 결과물)              (원본 utterances)              │
+  └─────────────────┬───────────────────────────┬───────────────────┘
+                    │                           │
+                    ▼                           ▼
+  ┌─────────────────────────────────────────────────────────────────┐
+  │                    SegmentMatcher                                │
+  │  ┌────────────────────────────────────────────────────────┐     │
+  │  │  Matching Priority:                                     │     │
+  │  │  1. Exact Match: start + end + text (100% confidence)  │     │
+  │  │  2. Timestamp: start + end (within 0.1s tolerance)     │     │
+  │  │  3. Text: exact text, relaxed timestamp                │     │
+  │  │  4. Fuzzy: similar text + similar timestamp            │     │
+  │  └────────────────────────────────────────────────────────┘     │
+  └─────────────────────────────┬───────────────────────────────────┘
+                                │
+                                ▼
+  ┌─────────────────────────────────────────────────────────────────┐
+  │  Migrated Segment Alignment                                     │
+  │  {"speaker": "SPEAKER_MAIN", "start": 1.5, "end": 3.2,         │
+  │   "text": "안녕하세요", "original_speaker_id": "spk_001"}       │
+  └─────────────────────────────────────────────────────────────────┘
+
+  2. 코드 수정
+
+  data_preparation/processors/segment_aligner.py
+  - Segment.to_dict(): original_speaker_id 저장 추가
+  - SegmentAlignment.load(): original_speaker_id 로드 추가
+
+  ---
+  사용법
+
+  1️⃣ Dry Run (테스트)
+
+  python data_preparation/scripts/migrate_speaker_ids.py \
+      --phase1-dir /path/to/data \
+      --lhotse-dir /path/to/data \
+      --dry-run --verbose --limit 100
+
+  2️⃣ 실제 마이그레이션 (백업 포함)
+
+  python data_preparation/scripts/migrate_speaker_ids.py \
+      --phase1-dir /path/to/data \
+      --lhotse-dir /path/to/data \
+      --backup
+
+  3️⃣ 별도 디렉토리에 저장
+
+  python data_preparation/scripts/migrate_speaker_ids.py \
+      --phase1-dir /path/to/data \
+      --lhotse-dir /path/to/data \
+      --output-dir /path/to/data
+
+  ---
+  예상 결과
+
+  ======================================================================
+  Migration Results
+  ======================================================================
+  Total files:           15,289
+  Processed files:       15,150
+  Skipped files:             89
+  Error files:               50
+  Conversations not found:   89
+
+  Total segments:        1,234,567
+    Matched (exact):     1,180,000  (95.6%)
+    Matched (timestamp):    35,000  ( 2.8%)
+    Matched (text):         12,000  ( 1.0%)
+    Matched (fuzzy):         5,000  ( 0.4%)
+    Unmatched:               2,567  ( 0.2%)
+
+  Match rate:            99.79%
+  Processing time:       180.5s
+  ======================================================================
+
+  ---
+  매칭 실패 시 자동 폴백
+
+  # 매칭 실패 시, speakers 딕셔너리에서 original_id 사용
+  if not matched:
+      speaker_role = segment["speaker"]  # "SPEAKER_MAIN" or "SPEAKER_USER"
+      speakers = alignment["speakers"]
+      fallback_id = speakers[speaker_role].get("original_id", "")
+      segment["original_speaker_id"] = fallback_id
+
+  ---
+  판단 기준
+
+  | Match Rate | 상태    | 권장 조치                 |
+  |------------|---------|---------------------------|
+  | ≥ 95%      | ✅ 성공 | 마이그레이션 완료         |
+  | 80-95%     | ⚠️ 경고 | conversation ID 형식 확인 |
+  | < 80%      | ❌ 실패 | Phase 1 재실행 필요       |
+
+  먼저 --dry-run --limit 100으로 테스트하여 매칭률을 확인하시고, 95% 이상이면 전체 마이그레이션을 진행하세요.
+  

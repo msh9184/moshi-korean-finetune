@@ -1,0 +1,178 @@
+# =============================================================================
+# K-Moshi Korean MONOLOGUE Pre-training Configuration (UNIFIED)
+# =============================================================================
+# This configuration is optimized for MONOLOGUE data (moshi_audio + moshi_text only)
+# where user audio is NOT present. Use this for pre-training stage before dialogue.
+#
+# Key differences from dialogue training:
+#   1. Layer 1: Only allow_case2 for monologue (case 1 also allowed if mixed data)
+#   2. Layer 2: min_user_words: 0 (no user speech requirement)
+#   3. Layer 3: preferences disabled (no speaker preference filtering)
+#   4. Layer 4: role_swapping disabled (no user audio to swap)
+#
+# Usage:
+#   torchrun --nproc-per-node 4 -m train example/korean_monologue_unified.yaml
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Data Configuration
+# -----------------------------------------------------------------------------
+data:
+  train_data: './data/korean_monologue_train.jsonl'
+  eval_data: ''
+  shuffle: true
+
+# -----------------------------------------------------------------------------
+# Model Paths
+# -----------------------------------------------------------------------------
+moshi_paths:
+  hf_repo_id: null
+  moshi_path: '/path/to/model'
+  mimi_path: '/path/to/model'
+  tokenizer_path: '/path/to/model'
+  config_path: '/path/to/model'
+
+# -----------------------------------------------------------------------------
+# Korean Finetuning Configuration (MONOLOGUE MODE)
+# -----------------------------------------------------------------------------
+korean:
+  enable_user_stream: true
+  initialized_model_path: './models/k-moshi-init'
+
+  korean_tokenizer_path: null
+  korean_tokenizer_type: 'sentencepiece'
+  retain_token_ids: [0, 3, 32000]
+
+  interleaver:
+    keep_main_only: true
+    keep_and_shift: false
+    adaptive_distribute: true
+    warn_on_overflow: true
+    character_level_interpolation: true
+    main_speaker_label: 'SPEAKER_MAIN'
+
+  # ===========================================================================
+  # UNIFIED SEGMENT FILTERING (MONOLOGUE OPTIMIZED)
+  # ===========================================================================
+  segment_filtering:
+
+    # -------------------------------------------------------------------------
+    # Layer 1: Case Control (MONOLOGUE SETTINGS)
+    # -------------------------------------------------------------------------
+    case_control:
+      enabled: true
+      allow_case1: true   # Allow if some segments have user audio
+      allow_case2: true   # CRITICAL: Allow Moshi-only segments (monologue)
+      allow_case3: false  # Skip user-only segments
+      allow_case4: false  # Skip missing Moshi audio
+      allow_case5: false  # Skip missing Moshi text
+
+      min_audio_energy: 0.001
+      min_audio_presence_ratio: 0.05
+
+    # -------------------------------------------------------------------------
+    # Layer 2: Quality (MONOLOGUE SETTINGS)
+    # -------------------------------------------------------------------------
+    quality:
+      enabled: true
+      min_moshi_words: 3
+      min_moshi_duration_sec: 3.0
+      min_moshi_ratio: 0.1
+      min_user_words: 0          # CRITICAL: Allow 0 user words for monologue!
+      min_segment_duration_sec: 10.0
+      max_segment_duration_sec: null
+
+    # -------------------------------------------------------------------------
+    # Layer 3: Preferences (DISABLED for monologue)
+    # -------------------------------------------------------------------------
+    preferences:
+      enabled: false  # No speaker preference filtering for monologue
+      prefer_moshi_start: false
+      prefer_moshi_start_prob: 0.0
+      prefer_both_speakers: false
+      prefer_both_speakers_prob: 0.0
+
+    # -------------------------------------------------------------------------
+    # Layer 4: Role Swapping (DISABLED for monologue)
+    # -------------------------------------------------------------------------
+    # No user audio to swap!
+    role_swapping:
+      enabled: false
+      probability: 0.0
+      swap_audio: false
+      swap_text: false
+      yield_both: false
+      recheck_after_swap: false
+
+    # -------------------------------------------------------------------------
+    # Layer 5: Logging
+    # -------------------------------------------------------------------------
+    logging:
+      enabled: true
+      verbosity: 1
+      log_first_filter: true
+      log_first_pass: true
+      log_case_detection: false
+      log_quality_checks: false
+      log_role_swapping: false
+      log_epoch_summary: true
+      save_to_file: true
+      log_filename: 'segment_filtering.log'
+
+# -----------------------------------------------------------------------------
+# Training Configuration
+# -----------------------------------------------------------------------------
+full_finetuning: true
+lora:
+  enable: false
+  rank: 64
+  scaling: 2.0
+  ft_embed: false
+
+distributed_backend: fsdp
+
+# -----------------------------------------------------------------------------
+# Loss Configuration
+# -----------------------------------------------------------------------------
+first_codebook_weight_multiplier: 100.0
+text_padding_weight: 0.5
+user_semantic_weight: null
+user_acoustic_weight: null
+user_stream_loss_ratio: 0.1  # Lower weight for user stream in monologue mode
+
+# -----------------------------------------------------------------------------
+# Training Hyperparameters
+# -----------------------------------------------------------------------------
+duration_sec: 60
+batch_size: 40
+num_microbatches: 8
+max_steps: 50000
+max_norm: 1.0
+gradient_checkpointing: true
+
+optim:
+  lr: 1.0e-5
+  weight_decay: 0.1
+  pct_start: 0.05
+
+param_dtype: bfloat16
+
+# -----------------------------------------------------------------------------
+# Checkpointing & Logging
+# -----------------------------------------------------------------------------
+seed: 42
+log_freq: 10
+eval_freq: 10
+do_eval: false
+do_ckpt: true
+ckpt_freq: 10
+save_adapters: false
+num_ckpt_keep: 3
+
+run_dir: './runs/korean_monologue_unified_v1'
+overwrite_run_dir: false
+
+wandb:
+  project: 'k-moshi'
+  run_name: 'korean-monologue-unified-v1'
+  offline: true

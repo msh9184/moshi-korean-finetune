@@ -1,0 +1,477 @@
+# =============================================================================
+# K-Moshi Version 4: MODULAR BACKBONE (HFLM/Custom LLM Support)
+# =============================================================================
+#
+# Key Changes from V3:
+#   - MODULAR BACKBONE: Swappable LLM backend (Moshi, HFLM, Custom)
+#   - DIMENSION ADAPTER: Automatic dimension bridging (4096 <-> 3072)
+#   - HFLM SUPPORT: HuggingFace Transformers-based backbone
+#   - Maintains FULL-DUPLEX training mode from V3
+#
+# Architecture Overview:
+#   +-----------------------------------------------------------------+
+#   |                     LMModelWrapper                              |
+#   |  +-----------------------------------------------------------+  |
+#   |  | AbstractBackbone (Pluggable)                              |  |
+#   |  |  - MoshiBackbone   (d_model=4096, 32 layers, MHA)        |  |
+#   |  |  - HFLMBackbone  (d_model=3072, 30 layers, GQA)        |  |
+#   |  |  - CustomBackbone  (user-defined)                        |  |
+#   |  +-----------------------------------------------------------+  |
+#   |  +-----------------------------------------------------------+  |
+#   |  | DimensionAdapter (Optional)                               |  |
+#   |  |  - input_proj:  4096 -> backbone_dim                     |  |
+#   |  |  - output_proj: backbone_dim -> 4096                     |  |
+#   |  +-----------------------------------------------------------+  |
+#   |  +-----------------------------------------------------------+  |
+#   |  | Shared Components (Fixed Moshi Dimension = 4096)          |  |
+#   |  |  - text_emb, audio_embs                                  |  |
+#   |  |  - Depformer (d_model=1024)                              |  |
+#   |  |  - text_linear, audio_linears                            |  |
+#   |  +-----------------------------------------------------------+  |
+#   +-----------------------------------------------------------------+
+#
+# Backbone Types:
+#   +----------+------------+--------+--------+---------+---------------+
+#   | Type     | Hidden Dim | Layers | Heads  | KV Heads| Notes         |
+#   +----------+------------+--------+--------+---------+---------------+
+#   | moshi    | 4096       | 32     | 32     | 32      | Default       |
+#   | hf_lm   | 3072       | 30     | 24     | 4 (GQA) | Korean LLM    |
+#   | custom   | Variable   | Varies | Varies | Varies  | User-defined  |
+#   +----------+------------+--------+--------+---------+---------------+
+#
+# Environment:
+#   - 1 Node x 8 GPU (NVIDIA A100 80GB)
+#   - torchrun + FSDP distributed training
+#   - Expected GPU Memory: ~60-70GB per GPU with HFLM
+#
+# Usage:
+#   torchrun --nproc-per-node 8 -m train example/korean_v4_fsdp.yaml
+#
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Data Configuration
+# -----------------------------------------------------------------------------
+data:
+  train_data: './data/korean_v3_train.jsonl'
+  eval_data: './data/korean_v3_valid.jsonl'
+  shuffle: true
+
+# -----------------------------------------------------------------------------
+# Model Paths (Local - Required for shared components)
+# -----------------------------------------------------------------------------
+# These paths are used to load the base Moshi model for extracting shared
+# components (embeddings, depformer, linears) even when using HFLM backbone.
+moshi_paths:
+  hf_repo_id: null
+  moshi_path: '/path/to/model'
+  mimi_path: '/path/to/model'
+  tokenizer_path: '/path/to/model'
+  config_path: '/path/to/model'
+
+# =============================================================================
+# MODULAR BACKBONE CONFIGURATION (NEW in V4)
+# =============================================================================
+# This section controls which LLM backbone is used for the main transformer.
+# The backbone processes the interleaved text+audio embeddings and produces
+# hidden states for prediction.
+#
+# Available backbone types:
+#   - "moshi":  Original Moshi transformer (default, backward compatible)
+#   - "hf_lm": HFLM/Mistral-based Korean LLM (requires dimension adapter)
+#   - "custom": User-defined backbone (requires registration in factory)
+#
+backbone:
+  # Backbone type selection
+  type: "hf_lm"  # Options: "moshi", "hf_lm", "custom"
+
+  # ---------------------------------------------------------------------------
+  # Moshi Backbone Configuration (used when type="moshi")
+  # ---------------------------------------------------------------------------
+  # Original Moshi architecture - no changes needed from base model
+  moshi:
+    hidden_dim: 4096
+    num_layers: 32
+    num_heads: 32
+    gradient_checkpointing: true
+
+  # ---------------------------------------------------------------------------
+  # HFLM Backbone Configuration (used when type="hf_lm")
+  # ---------------------------------------------------------------------------
+  # HuggingFace Transformers-based backbone for HFLM/Mistral models
+  hf_lm:
+    # Path to HuggingFace model or local directory
+    # Supports: HF-causal-LM, Mistral-7B, or compatible models
+    model_path: '/path/to/model'
+
+    # Model architecture parameters
+    hidden_dim: 3072          # d_model dimension
+    num_layers: 30            # Number of transformer layers
+    num_heads: 24             # Number of attention heads
+    num_key_value_heads: 4    # KV heads for GQA (Grouped Query Attention)
+
+    # Model loading options
+    load_pretrained: true     # Load pretrained weights from model_path
+    torch_dtype: 'bfloat16'   # Model dtype: bfloat16, float16, float32
+
+    # Performance options
+    gradient_checkpointing: true   # Enable gradient checkpointing
+    use_flash_attention: false     # Use Flash Attention 2 (if available)
+
+    # Sliding window attention (for models that support it)
+    sliding_window: null      # Sliding window size (null = disabled)
+
+  # ---------------------------------------------------------------------------
+  # Dimension Adapter Configuration
+  # ---------------------------------------------------------------------------
+  # Bridges dimension mismatch between Moshi (4096) and backbone (e.g., 3072)
+  # Required when backbone.hidden_dim != 4096
+  #
+  # Architecture:
+  #   Input (4096) -> input_proj -> backbone -> output_proj -> Output (4096)
+  #
+  dimension_adapter:
+    enable: true              # Enable dimension adapter
+
+    # Dimension settings
+    moshi_dim: 4096           # Fixed Moshi dimension (do not change)
+    backbone_dim: 3072        # Backbone hidden dimension (auto-detected if null)
+
+    # Projection settings
+    bias: false               # Use bias in projection layers
+    dropout: 0.0              # Dropout rate (0.0 = disabled)
+
+    # Initialization method for projection weights
+    # Options: "xavier", "kaiming", "normal", "identity_init"
+    init_method: "xavier"
+    init_scale: 1.0           # Scale factor for initialization
+
+# -----------------------------------------------------------------------------
+# Korean Finetuning Configuration
+# -----------------------------------------------------------------------------
+# V4: Maintains FULL-DUPLEX mode from V3, with modular backbone support
+korean:
+  # Training mode (same as V3)
+  enable_user_stream: false   # Use FULL-DUPLEX mode
+  full_duplex_input: true     # Stereo input n_q=16 with dep_q=8 output
+
+  # Extended model path (NOT NEEDED for FULL-DUPLEX mode)
+  initialized_model_path: null
+
+  # Korean tokenizer configuration (optional)
+  korean_tokenizer_path: null
+  korean_tokenizer_type: 'sentencepiece'
+  retain_token_ids: [0, 3, 32000]
+
+  # ---------------------------------------------------------------------------
+  # Text-Audio Interleaver Configuration
+  # ---------------------------------------------------------------------------
+  interleaver:
+    keep_main_only: true
+    keep_and_shift: false
+    adaptive_distribute: true
+    warn_on_overflow: true
+    character_level_interpolation: true
+    main_speaker_label: 'SPEAKER_MAIN'
+
+  # ===========================================================================
+  # UNIFIED SEGMENT FILTERING (5-Layer System) - Same as V3
+  # ===========================================================================
+  segment_filtering:
+    case_control:
+      enabled: true
+      allow_case1: true   # Full dialogue
+      allow_case2: true   # Moshi monologue
+      allow_case3: false  # User audio only
+      allow_case4: false  # Missing Moshi audio
+      allow_case5: false  # Missing Moshi text
+      min_audio_energy: 0.001
+      min_audio_presence_ratio: 0.05
+
+    quality:
+      enabled: true
+      min_moshi_words: 3
+      min_moshi_duration_sec: 3.0
+      min_moshi_ratio: 0.1
+      min_user_words: 0
+      min_segment_duration_sec: 10.0
+      max_segment_duration_sec: null
+
+    preferences:
+      enabled: true
+      prefer_moshi_start: false
+      prefer_moshi_start_prob: 0.7
+      prefer_both_speakers: true
+      prefer_both_speakers_prob: 0.5
+
+    role_swapping:
+      enabled: true
+      probability: 0.2
+      swap_audio: true
+      swap_text: true
+      yield_both: true
+      recheck_after_swap: true
+
+    logging:
+      enabled: true
+      verbosity: 1
+      log_first_filter: true
+      log_first_pass: true
+      log_case_detection: false
+      log_quality_checks: false
+      log_role_swapping: false
+      log_epoch_summary: true
+      save_to_file: true
+      log_filename: 'segment_filtering.log'
+
+# -----------------------------------------------------------------------------
+# Training Mode
+# -----------------------------------------------------------------------------
+# V4 uses full finetuning by default for modular backbone
+# LoRA support for HFLM backbone is experimental
+full_finetuning: true
+
+lora:
+  enable: false
+  rank: 64
+  scaling: 2.0
+  ft_embed: false
+
+distributed_backend: fsdp
+
+# -----------------------------------------------------------------------------
+# Loss Configuration
+# -----------------------------------------------------------------------------
+first_codebook_weight_multiplier: 100.0
+text_padding_weight: 0.5
+
+# User stream loss weights (NOT used in FULL-DUPLEX mode)
+user_semantic_weight: null
+user_acoustic_weight: null
+user_stream_loss_ratio: 0.0
+
+# -----------------------------------------------------------------------------
+# Sequence and Batch Configuration (A100 80GB Optimized for HFLM)
+# -----------------------------------------------------------------------------
+# HFLM (3B) is smaller than Moshi (7B), allowing larger batches
+duration_sec: 40
+batch_size: 128           # Increased from 96 due to smaller backbone
+num_microbatches: 8
+max_steps: 50000
+max_norm: 1.0
+gradient_checkpointing: true
+
+# -----------------------------------------------------------------------------
+# Optimizer Configuration
+# -----------------------------------------------------------------------------
+# Two-rate optimizer for TempFormer + DepFormer
+# Note: backbone_lr can be adjusted for modular backbone
+optim:
+  lr: 3.0e-5              # Backbone (HFLM) learning rate
+  depformer_lr: 3.0e-5    # DepFormer learning rate
+  adapter_lr: 1.0e-4      # Dimension adapter learning rate (NEW in V4)
+  weight_decay: 0.1
+  beta1: 0.9
+  beta2: 0.95
+  eps: 1.0e-5
+  pct_start: 0.05
+
+# -----------------------------------------------------------------------------
+# Scheduler Configuration
+# -----------------------------------------------------------------------------
+scheduler:
+  type: 'cosine_warmup'
+  warmup_steps: 100
+  min_lr: 1.0e-7
+  t_0: 1000
+  t_mult: 2
+
+param_dtype: bfloat16
+
+# -----------------------------------------------------------------------------
+# Checkpointing & Resume Configuration
+# -----------------------------------------------------------------------------
+checkpoint:
+  enabled: true
+  name_prefix: 'checkpoint'
+  metric_type: 'eval_loss'
+  metric_best: 'min'
+  resume_if_exist: true
+  resume_from: null
+  save_optimizer: true
+  save_scheduler: true
+  save_rng_state: true
+  save_freq: 1
+  max_keep: 15
+  save_adapters_only: false
+  save_dtype: 'bfloat16'
+
+# Legacy checkpoint options (for backward compatibility)
+seed: 42
+log_freq: 1
+eval_freq: 1
+do_eval: true
+eval_samples: 100
+do_ckpt: false
+ckpt_freq: 1
+save_adapters: false
+num_ckpt_keep: 15
+
+run_dir: './runs/korean_v4_hf_lm'
+overwrite_run_dir: false
+
+# -----------------------------------------------------------------------------
+# TensorBoard Logging
+# -----------------------------------------------------------------------------
+tensorboard:
+  enabled: true
+  log_histograms: true
+  histogram_freq: 1
+  log_gradients: true
+  gradient_freq: 1
+  log_memory: true
+  log_per_codebook: true
+  flush_secs: 30
+
+# -----------------------------------------------------------------------------
+# Weights & Biases (Optional)
+# -----------------------------------------------------------------------------
+wandb:
+  project: 'k-moshi'
+  run_name: 'korean-v4-hf_lm-backbone'
+  offline: true
+  enabled: false
+
+# -----------------------------------------------------------------------------
+# Advanced Monitoring Configuration
+# -----------------------------------------------------------------------------
+monitoring:
+  text_evaluation:
+    enabled: true
+    eval_freq: 1
+    log_predictions: true
+    max_prediction_samples: 3
+    normalize_text: true
+
+  codebook_analysis:
+    enabled: true
+    log_freq: 1
+    log_usage_stats: true
+    log_entropy: true
+
+  gradient_monitoring:
+    enabled: true
+    log_freq: 1
+    alert_on_nan: true
+    alert_on_inf: true
+    exploding_threshold: 100.0
+    vanishing_threshold: 1.0e-7
+    log_per_layer: false
+
+  # NEW in V4: Backbone-specific monitoring
+  backbone_monitoring:
+    enabled: true
+    log_adapter_norms: true       # Log dimension adapter weight norms
+    log_backbone_activations: false  # Log backbone hidden state statistics
+    compare_backbone_moshi: false    # Compare backbone vs Moshi outputs (debug)
+
+# -----------------------------------------------------------------------------
+# Enhanced Evaluation Configuration
+# -----------------------------------------------------------------------------
+enhanced_evaluation:
+  semantic:
+    enabled: true
+    compute_bleu: true
+    compute_semantic: false
+    max_samples: 20
+
+  alignment:
+    enabled: true
+    tolerance_frames: 2
+
+  dialogue:
+    enabled: false
+    overlap_threshold_frames: 3
+    silence_threshold_frames: 25
+
+  audio_quality:
+    enabled: false
+    compute_pesq: true
+    compute_stoi: true
+    compute_mcd: true
+    max_samples: 3
+
+# -----------------------------------------------------------------------------
+# Sample Saving Configuration
+# -----------------------------------------------------------------------------
+sample_saving:
+  enabled: true
+  save_segment_samples: true
+  save_dialogue_samples: false
+  save_freq: 1
+  max_samples_per_split: 25
+  samples_per_save: 5
+  max_dialogues_per_split: 5
+  save_audio: true
+  save_text: true
+  audio_format: 'wav'
+  sample_rate: 24000
+
+# -----------------------------------------------------------------------------
+# Research Logging Configuration
+# -----------------------------------------------------------------------------
+research_logging:
+  enabled: true
+  save_attention_maps: true
+  attention_freq: 1
+  attention_samples: 2
+  save_raw_attention: false
+  save_loss_curves: true
+  save_codebook_stats: true
+  save_gradient_norms: true
+  generate_plots: true
+  plot_freq: 1
+  save_summary: true
+
+# =============================================================================
+# Configuration Summary (V4 - MODULAR BACKBONE)
+# =============================================================================
+#
+# Key Features:
+#   - Modular backbone system: Easily swap between Moshi, HFLM, or custom LLMs
+#   - Dimension adapter: Automatic bridging for dimension mismatches
+#   - Full backward compatibility: Moshi backbone works exactly like V3
+#
+# Architecture:
+#   +-----------------------------------------------------------------------+
+#   |                        LMModelWrapper                                 |
+#   +-----------------------------------------------------------------------+
+#   | Input Embedding (Moshi, 4096-dim)                                     |
+#   |   - text_emb: [32000, 4096]                                          |
+#   |   - audio_embs: [8 x [2048, 4096]]                                   |
+#   +-----------------------------------+-----------------------------------+
+#   | DimensionAdapter (input_proj)     | 4096 -> 3072                     |
+#   +-----------------------------------+-----------------------------------+
+#   | HFLMBackbone (3B)               | 30 layers, 24 heads, 4 KV heads  |
+#   |   - HuggingFace Transformers      | GQA for efficient attention      |
+#   |   - Pretrained Korean weights     | Gradient checkpointing supported |
+#   +-----------------------------------+-----------------------------------+
+#   | DimensionAdapter (output_proj)    | 3072 -> 4096                     |
+#   +-----------------------------------+-----------------------------------+
+#   | Output Heads (Moshi, 4096-dim)    |                                   |
+#   |   - text_linear: [4096, 32000]    | Text token prediction            |
+#   |   - Depformer + linears           | Audio codebook prediction        |
+#   +-----------------------------------------------------------------------+
+#
+# Training Flow:
+#   1. Load base Moshi model (for embeddings, depformer, linears)
+#   2. Create HFLMBackbone from HuggingFace model
+#   3. Create DimensionAdapter for 4096 <-> 3072 bridging
+#   4. Wrap in LMModelWrapper
+#   5. Apply FSDP/DDP distributed training
+#
+# Memory Comparison (A100 80GB):
+#   - Moshi (7B): ~60GB with batch_size=96, duration_sec=40
+#   - HFLM (3B): ~50GB with batch_size=128, duration_sec=40
+#
+# =============================================================================

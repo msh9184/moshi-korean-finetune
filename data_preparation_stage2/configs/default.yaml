@@ -1,0 +1,231 @@
+# =============================================================================
+# K-Moshi Data Preparation Stage 2: Default Configuration
+# =============================================================================
+#
+# Purpose: Synthetic dialogue generation using external TTS
+# Target: 500-1000 hours of full-duplex Korean dialogue data
+#
+# Usage:
+#   python -m data_preparation_stage2.scripts.run_synthesis configs/default.yaml
+#
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Text Corpus Configuration
+# -----------------------------------------------------------------------------
+corpus:
+  sources:
+    - type: "aihub"
+      name: "감성대화"
+      path: "/data/aihub/emotion_dialogue"
+      weight: 0.4
+
+    - type: "nikl"
+      name: "모두의말뭉치_구어"
+      path: "/data/nikl/spoken"
+      weight: 0.3
+
+    - type: "custom"
+      name: "identity_qa"
+      path: "./identity/data/identity_qa.yaml"
+      weight: 0.2
+      priority: "high"
+
+    - type: "custom"
+      name: "voice_agent_scenarios"
+      path: "/data/custom/voice_agent.jsonl"
+      weight: 0.1
+
+  normalization:
+    remove_special_chars: true
+    normalize_numbers: true
+    normalize_units: true
+    max_turn_length: 100
+
+  spoken_conversion:
+    enabled: true
+    llm_model: "gemma-2-27b"
+    prompt_template: "korean_spoken_style"
+    batch_size: 100
+
+# -----------------------------------------------------------------------------
+# K-Moshi Identity System
+# -----------------------------------------------------------------------------
+identity:
+  name: "K-Moshi"
+  aliases: ["케이모시", "모시", "K모시"]
+
+  personality:
+    traits:
+      - "친절하고 도움이 되려는"
+      - "한국어에 능통한"
+      - "오픈소스 음성 AI 프로젝트에서 개발된"
+    speaking_style: "존댓말 기본, 상황에 따라 유연하게"
+
+  qa_templates:
+    enabled: true
+    categories:
+      - "self_introduction"
+      - "capabilities"
+      - "limitations"
+      - "creator_info"
+      - "technical_info"
+      - "greetings"
+      - "farewells"
+
+    generation:
+      variations_per_question: 5
+      include_follow_ups: true
+
+  injection_rate: 0.15
+
+# -----------------------------------------------------------------------------
+# Full-Duplex Timing Configuration
+# -----------------------------------------------------------------------------
+timing:
+  turn_taking:
+    min_gap: 0.1
+    max_gap: 1.5
+    mean_gap: 0.4
+    gap_distribution: "lognormal"
+
+  overlap:
+    enabled: true
+    probability: 0.35
+    min_duration: 0.1
+    max_duration: 1.0
+    mean_duration: 0.3
+
+  backchannel:
+    enabled: true
+    probability: 0.25
+    tokens:
+      - { text: "응", weight: 0.30 }
+      - { text: "네", weight: 0.25 }
+      - { text: "아", weight: 0.15 }
+      - { text: "음", weight: 0.15 }
+      - { text: "그래", weight: 0.10 }
+      - { text: "맞아", weight: 0.05 }
+    timing:
+      offset_range: [0.5, 2.0]
+      overlap_with_speaker: true
+
+  barge_in:
+    enabled: true
+    probability: 0.08
+    trigger_conditions:
+      - "urgency_detected"
+      - "clarification_needed"
+      - "strong_agreement"
+    cut_previous_turn: true
+
+# -----------------------------------------------------------------------------
+# TTS Configuration
+# -----------------------------------------------------------------------------
+tts:
+  primary:
+    type: "openaudio_s1"
+    model_path: "/models/openaudio-s1-mini"
+    sample_rate: 24000
+
+  secondary:
+    type: "supertonic"
+    model_path: "/models/supertonic-2"
+    sample_rate: 24000
+
+  strategy:
+    moshi_ratio: 1.0
+    user_ratio: 0.7
+
+  batch_size: 32
+  num_workers: 4
+
+  quality:
+    min_audio_duration: 0.3
+    max_audio_duration: 30.0
+    normalize_volume: true
+    target_db: -23.0
+
+# -----------------------------------------------------------------------------
+# Voice Configuration
+# -----------------------------------------------------------------------------
+voice:
+  moshi:
+    reference_audio: "./voice/samples/moshi/moshi_reference.wav"
+    voice_id: "kmoshi_v1"
+    characteristics:
+      gender: "neutral"
+      age_group: "young_adult"
+      tone: "warm_professional"
+
+  users:
+    min_voices: 10
+    max_voices: 20
+    diversity:
+      gender_ratio: 0.5
+      age_groups: ["young", "middle", "senior"]
+      regional_accents: ["seoul", "gyeongsang", "jeolla"]
+    reference_dir: "./voice/samples/users/"
+
+  assignment:
+    mode: "random"
+    persist_per_dialogue: true
+
+# -----------------------------------------------------------------------------
+# Quality Assurance
+# -----------------------------------------------------------------------------
+quality:
+  wer:
+    enabled: true
+    max_wer_moshi: 0.15
+    max_wer_user: 0.25
+    samples_per_dialogue: 10
+    select_best: true
+
+  audio:
+    min_snr: 20
+    check_clipping: true
+    max_silence_ratio: 0.3
+
+  dialogue:
+    min_turns: 2
+    max_turns: 50
+    min_moshi_words: 10
+    min_user_words: 5
+    check_coherence: false
+
+# -----------------------------------------------------------------------------
+# Output Configuration
+# -----------------------------------------------------------------------------
+output:
+  base_dir: "/path/to/data"
+
+  format:
+    audio: "wav"
+    sample_rate: 24000
+    channels: 2
+
+  structure:
+    audio_dir: "audio"
+    alignment_dir: "alignments"
+    manifest_file: "manifest.jsonl"
+
+  distributed:
+    num_machines: 8
+    sharding: "round_robin"
+
+# -----------------------------------------------------------------------------
+# Processing Configuration
+# -----------------------------------------------------------------------------
+processing:
+  device: "cuda"
+  gpu_ids: [0, 1, 2, 3, 4, 5, 6, 7]
+
+  num_workers: 8
+  batch_size: 32
+
+  checkpoint_interval: 1000
+  resume_from_checkpoint: true
+
+  log_interval: 100
+  verbose: true

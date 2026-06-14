@@ -1,0 +1,473 @@
+# =============================================================================
+# K-Moshi Version 3: FULL-DUPLEX Mode (Original Moshi / J-Moshi Compatible)
+# =============================================================================
+#
+# Key Changes from V2:
+#   - FULL-DUPLEX MODE: Stereo input (17 codebooks), dep_q=8 output
+#   - User audio used as CONTEXT ONLY (not predicted)
+#   - 100% compatible with original Moshi inference pipeline
+#   - J-Moshi style training configuration
+#
+# Training Modes Reference:
+#   +--------------+------------------------+------------+-------------------+
+#   | Mode         | Input Codebooks        | Output     | User Audio        |
+#   +--------------+------------------------+------------+-------------------+
+#   | MONOLOGUE    | 9 (mono, padded to 17) | dep_q=8    | None              |
+#   | FULL-DUPLEX  | 17 (stereo)            | dep_q=8    | Context only (V3) |
+#   | USER-STREAM  | 17 (stereo)            | dep_q=16   | Predicted (V2)    |
+#   +--------------+------------------------+------------+-------------------+
+#
+# Environment:
+#   - 1 Node x 8 GPU (NVIDIA A100 80GB)
+#   - torchrun + FSDP distributed training
+#   - Expected GPU Memory: ~55-60GB per GPU (70-75% utilization)
+#
+# Usage:
+#   torchrun --nproc-per-node 8 -m train example/korean_v3_fsdp.yaml
+#
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Data Configuration
+# -----------------------------------------------------------------------------
+data:
+  train_data: './data/korean_v3_train.jsonl'
+  eval_data: './data/korean_v3_valid.jsonl'
+  shuffle: true
+
+# -----------------------------------------------------------------------------
+# Model Paths (Local)
+# -----------------------------------------------------------------------------
+moshi_paths:
+  hf_repo_id: null
+  moshi_path: 'k-moshi-finetune/models/tokenizer_spe_unigram_v32000_max_500_pad_bos_eos/tokenizer.model'
+  mimi_path: '/path/to/model'
+  tokenizer_path: '/path/to/model'
+  config_path: '/path/to/model'
+
+# -----------------------------------------------------------------------------
+# Korean Finetuning Configuration
+# -----------------------------------------------------------------------------
+# V3: FULL-DUPLEX Mode (Original Moshi / J-Moshi Default)
+#
+# This mode uses:
+#   - Stereo input data (17 codebooks: 1 text + 8 moshi + 8 user)
+#   - Standard dep_q=8 output (original Moshi architecture)
+#   - User audio as INPUT CONTEXT ONLY (not predicted)
+#
+# Key difference from V2 (USER-STREAM):
+#   - V2: dep_q=16, predicts both Moshi AND User audio
+#   - V3: dep_q=8, predicts Moshi audio only (user = context)
+#
+korean:
+  # ==========================================================================
+  # TRAINING MODE CONFIGURATION
+  # ==========================================================================
+  # enable_user_stream: When True, uses USER-STREAM mode (dep_q=16)
+  # full_duplex_input:  When True AND enable_user_stream=False, uses FULL-DUPLEX mode
+  #
+  # Recommended combinations:
+  #   MONOLOGUE:   enable_user_stream=False, full_duplex_input=False
+  #   FULL-DUPLEX: enable_user_stream=False, full_duplex_input=True  (V3 default)
+  #   USER-STREAM: enable_user_stream=True (V2 style)
+  #
+  enable_user_stream: false   # V3: Use FULL-DUPLEX mode
+  full_duplex_input: true     # V3: Stereo input n_q=16 with dep_q=8 output
+
+  # Path to extended model (NOT NEEDED for FULL-DUPLEX mode)
+  # Only required when enable_user_stream=True
+  initialized_model_path: null
+
+  # Korean tokenizer configuration (optional)
+  korean_tokenizer_path: null
+  korean_tokenizer_type: 'sentencepiece'
+  retain_token_ids: [0, 3, 32000]
+
+  # ---------------------------------------------------------------------------
+  # Text-Audio Interleaver Configuration
+  # ---------------------------------------------------------------------------
+  interleaver:
+    keep_main_only: true          # Use only SPEAKER_MAIN text
+    keep_and_shift: false         # Replace queue on overlap (recommended)
+    adaptive_distribute: true     # Distribute tokens evenly on overflow
+    warn_on_overflow: true        # Log warnings on token overflow
+    character_level_interpolation: true  # J-Moshi style precise alignment
+    main_speaker_label: 'SPEAKER_MAIN'
+
+  # ===========================================================================
+  # UNIFIED SEGMENT FILTERING (5-Layer System)
+  # ===========================================================================
+  # This unified configuration replaces the legacy data_filtering and
+  # data_augmentation sections. All filtering and augmentation is now
+  # controlled through a single, organized 5-layer system.
+  #
+  # Layer 1: Case Control - Structural validity (allow_case1..5)
+  # Layer 2: Quality - Hard minimums (min_moshi_words, etc.)
+  # Layer 3: Preferences - Probabilistic preferences (optional)
+  # Layer 4: Role Swapping - Data augmentation (2x data)
+  # Layer 5: Logging - Debug and statistics
+  segment_filtering:
+
+    # -------------------------------------------------------------------------
+    # Layer 1: Case Control (Structural Validity)
+    # -------------------------------------------------------------------------
+    # Controls which segment types are allowed based on stream presence:
+    #
+    # +------+----------------------------------------+---------+---------------------+
+    # | Case | Configuration                          | Default | Description         |
+    # +------+----------------------------------------+---------+---------------------+
+    # | 1    | moshi_audio + moshi_text + user_audio  | [ALLOW] | Full dialogue       |
+    # | 2    | moshi_audio + moshi_text               | [ALLOW] | Moshi monologue     |
+    # | 3    | user_audio only                        | [SKIP]  | No Moshi content    |
+    # | 4    | moshi_text + user_audio                | [SKIP]  | Missing Moshi audio |
+    # | 5    | moshi_audio + user_audio               | [SKIP]  | Missing Moshi text  |
+    # +------+----------------------------------------+---------+---------------------+
+    #
+    case_control:
+      enabled: true
+
+      # Explicit case control (set True to ALLOW, False to FILTER OUT)
+      allow_case1: true   # Full dialogue (moshi + user)
+      allow_case2: true   # Moshi monologue (dialogue training allows both)
+      allow_case3: false  # User audio only (bad data)
+      allow_case4: false  # Missing Moshi audio (data corruption)
+      allow_case5: false  # Missing Moshi text (data corruption)
+
+      # Audio signal detection thresholds
+      min_audio_energy: 0.001           # Minimum RMS energy to detect audio
+      min_audio_presence_ratio: 0.05    # Minimum % of frames with audio
+
+    # -------------------------------------------------------------------------
+    # Layer 2: Quality Requirements (Hard Minimums)
+    # -------------------------------------------------------------------------
+    # Segments not meeting these requirements are always skipped.
+    #
+    # [!] IMPORTANT for MONOLOGUE training:
+    #    Set min_user_words=0 to allow segments without user speech!
+    quality:
+      enabled: true
+
+      # Moshi speech requirements
+      min_moshi_words: 3              # Minimum words Moshi must speak
+      min_moshi_duration_sec: 3.0     # Minimum Moshi speech duration
+      min_moshi_ratio: 0.1            # Minimum Moshi speech ratio (vs total)
+
+      # User speech requirements
+      # [!] Set to 0 for MONOLOGUE training!
+      min_user_words: 0               # Minimum words User must speak
+
+      # Segment duration requirements
+      min_segment_duration_sec: 10.0  # Minimum segment duration
+      max_segment_duration_sec: null  # Maximum segment duration (null = unlimited)
+
+    # -------------------------------------------------------------------------
+    # Layer 3: Preferences (Probabilistic)
+    # -------------------------------------------------------------------------
+    # Soft preferences that skip segments with a probability.
+    # Use for training data shaping without hard filtering.
+    preferences:
+      enabled: true
+
+      # Prefer segments where Moshi speaks first
+      prefer_moshi_start: false
+      prefer_moshi_start_prob: 0.7    # Skip 70% of user-first segments
+
+      # Prefer segments with both speakers (for dialogue training)
+      prefer_both_speakers: true
+      prefer_both_speakers_prob: 0.5  # Skip 50% of single-speaker segments
+
+    # -------------------------------------------------------------------------
+    # Layer 4: Role Swapping (Data Augmentation)
+    # -------------------------------------------------------------------------
+    # Swaps Moshi<->User roles to create 2x training data.
+    # Audio: LEFT<->RIGHT channels
+    # Text: SPEAKER_MAIN<->other speaker labels
+    #
+    # [!] IMPORTANT: When role_swapping is enabled:
+    #    - Original sample: Moshi=LEFT, User=RIGHT
+    #    - Swapped sample:  Moshi=RIGHT(was User), User=LEFT(was Moshi)
+    #    - User text becomes Moshi text (and vice versa)
+    #    - All filters are re-applied to swapped samples
+    role_swapping:
+      enabled: true
+      probability: 0.2          # 100% swap probability when not yield_both
+      swap_audio: true          # Swap audio channels
+      swap_text: true           # Swap speaker labels in alignments
+      yield_both: true          # Yield BOTH original AND swapped (2x data)
+      recheck_after_swap: true  # Re-run Layer 1 check after swap
+
+    # -------------------------------------------------------------------------
+    # Layer 5: Logging and Debugging
+    # -------------------------------------------------------------------------
+    logging:
+      enabled: true
+      verbosity: 1  # 0=minimal, 1=summary, 2=detailed, 3=debug
+
+      # First event logging (quick debugging)
+      log_first_filter: true   # Log first filtered segment
+      log_first_pass: true     # Log first passed segment
+
+      # Per-layer logging (detailed debugging)
+      log_case_detection: false   # Log each case detection
+      log_quality_checks: false   # Log each quality check
+      log_role_swapping: false    # Log each swap operation
+
+      # Summary logging
+      log_epoch_summary: true     # Log statistics at epoch end
+
+      # File output
+      save_to_file: true
+      log_filename: 'segment_filtering.log'
+
+# -----------------------------------------------------------------------------
+# Training Mode
+# -----------------------------------------------------------------------------
+full_finetuning: true
+
+lora:
+  enable: false
+  rank: 64
+  scaling: 2.0
+  ft_embed: false
+
+distributed_backend: fsdp
+
+# -----------------------------------------------------------------------------
+# Loss Configuration (J-Moshi Style)
+# -----------------------------------------------------------------------------
+# NOTE: For FULL-DUPLEX mode (V3), user_semantic_weight and user_acoustic_weight
+# are NOT USED because user audio is context only (not predicted).
+first_codebook_weight_multiplier: 100.0  # Semantic codebook weight
+text_padding_weight: 0.5                  # Text padding token weight
+
+# User stream loss weights (ONLY used in USER-STREAM mode, ignored in FULL-DUPLEX)
+user_semantic_weight: null    # Not used in V3 (FULL-DUPLEX mode)
+user_acoustic_weight: null    # Not used in V3 (FULL-DUPLEX mode)
+user_stream_loss_ratio: 1.0   # Not used in V3 (FULL-DUPLEX mode)
+
+# -----------------------------------------------------------------------------
+# Sequence and Batch Configuration (A100 80GB Optimized)
+# -----------------------------------------------------------------------------
+duration_sec: 40
+batch_size: 96
+num_microbatches: 8
+max_steps: 50000
+max_norm: 1.0
+gradient_checkpointing: true
+
+# -----------------------------------------------------------------------------
+# Optimizer Configuration (Two-rate for TempFormer + DepFormer)
+# -----------------------------------------------------------------------------
+optim:
+  lr: 3.0e-5            # TempFormer LR (LLM)
+  depformer_lr: 3.0e-5  # DepFormer LR
+  weight_decay: 0.1
+  beta1: 0.9
+  beta2: 0.95
+  eps: 1.0e-5
+  pct_start: 0.05
+
+# -----------------------------------------------------------------------------
+# Scheduler Configuration
+# -----------------------------------------------------------------------------
+scheduler:
+  type: 'cosine_warmup'
+  warmup_steps: 100 # 500
+  min_lr: 1.0e-7
+  t_0: 1000
+  t_mult: 2
+
+param_dtype: bfloat16
+
+# -----------------------------------------------------------------------------
+# Checkpointing & Resume Configuration
+# -----------------------------------------------------------------------------
+# New checkpoint system with metric-based naming and full resume support.
+#
+# Checkpoint File Structure:
+#   runs/{run_name}/checkpoints/
+#   ├── config.json
+#   ├── checkpoint.eval_loss-3.570.step-000080.safetensors
+#   ├── checkpoint.eval_loss-3.570.step-000080.best.safetensors  (symlink)
+#   ├── checkpoint.eval_loss-3.570.step-000080.last.safetensors  (symlink)
+#   ├── training_state.step-000080.best.pt
+#   └── training_state.step-000080.last.pt
+#
+checkpoint:
+  enabled: true                    # Enable new checkpoint system
+  name_prefix: 'checkpoint'        # Prefix for checkpoint filenames
+  metric_type: 'eval_loss'         # Metric for naming: train_loss, eval_loss, eval_perplexity
+  metric_best: 'min'               # 'min' (lower is better) or 'max' (higher is better)
+  resume_if_exist: true            # Auto-resume if checkpoints exist in run_dir
+  resume_from: null                # Explicit checkpoint path (overrides resume_if_exist)
+  save_optimizer: true             # Save optimizer state for perfect resume
+  save_scheduler: true             # Save scheduler state
+  save_rng_state: true             # Save RNG state for reproducibility
+  save_freq: 1                     # Save checkpoint every N steps
+  max_keep: 15                     # Maximum checkpoints to keep (null = unlimited)
+  save_adapters_only: false        # Save only LoRA adapters (for LoRA finetuning)
+  save_dtype: 'bfloat16'           # Checkpoint save dtype
+
+# Legacy checkpoint options (kept for backward compatibility)
+# These are only used if checkpoint.enabled is False
+seed: 42
+log_freq: 1
+eval_freq: 1
+do_eval: true
+eval_samples: 100
+
+do_ckpt: false                     # Disabled - use new checkpoint system instead
+ckpt_freq: 1
+save_adapters: false
+num_ckpt_keep: 15
+
+run_dir: './runs/korean_v3'
+overwrite_run_dir: false
+
+# -----------------------------------------------------------------------------
+# TensorBoard Logging
+# -----------------------------------------------------------------------------
+tensorboard:
+  enabled: true
+  log_histograms: true
+  histogram_freq: 1
+  log_gradients: true
+  gradient_freq: 1
+  log_memory: true
+  log_per_codebook: true
+  flush_secs: 30
+
+# -----------------------------------------------------------------------------
+# Weights & Biases (Optional)
+# -----------------------------------------------------------------------------
+wandb:
+  project: 'k-moshi'
+  run_name: 'korean-v3-full-duplex'
+  offline: true
+  enabled: false
+
+# -----------------------------------------------------------------------------
+# Advanced Monitoring Configuration
+# -----------------------------------------------------------------------------
+monitoring:
+  text_evaluation:
+    enabled: true
+    eval_freq: 1
+    log_predictions: true
+    max_prediction_samples: 3
+    normalize_text: true
+
+  codebook_analysis:
+    enabled: true
+    log_freq: 1
+    log_usage_stats: true
+    log_entropy: true
+
+  gradient_monitoring:
+    enabled: true
+    log_freq: 1
+    alert_on_nan: true
+    alert_on_inf: true
+    exploding_threshold: 100.0
+    vanishing_threshold: 1.0e-7
+    log_per_layer: false
+
+# -----------------------------------------------------------------------------
+# Enhanced Evaluation Configuration
+# -----------------------------------------------------------------------------
+# Comprehensive evaluation metrics beyond basic loss:
+#   - Semantic: BLEU scores for text quality
+#   - Alignment: Text-audio timing accuracy
+#   - Dialogue: Turn-taking, response latency (Full-Duplex only)
+#   - Audio Quality: PESQ, STOI, MCD (expensive, disabled by default)
+#
+enhanced_evaluation:
+  # Semantic Quality Monitor (BLEU scores)
+  semantic:
+    enabled: true
+    compute_bleu: true              # Compute BLEU-1/2/3/4 and corpus BLEU
+    compute_semantic: false         # Compute semantic similarity (requires sentence-transformers)
+    max_samples: 20                 # Max samples to accumulate per epoch
+
+  # Alignment Quality Monitor (Text-Audio sync)
+  alignment:
+    enabled: true
+    tolerance_frames: 2             # Allowed timing error in frames (80ms/frame)
+
+  # Dialogue Quality Monitor (Full-Duplex mode only)
+  # Automatically enabled when korean.full_duplex_input=true AND enable_user_stream=false
+  dialogue:
+    enabled: false                  # Only active in Full-Duplex mode
+    overlap_threshold_frames: 3     # Frames to consider as overlap (~240ms)
+    silence_threshold_frames: 25    # Frames to consider as silence (~2 sec)
+
+  # Audio Quality Monitor (PESQ, STOI, MCD)
+  # [!] WARNING: Computationally expensive - requires Mimi decoder
+  audio_quality:
+    enabled: false                   # Disabled by default due to computational cost
+    compute_pesq: true              # Perceptual Evaluation of Speech Quality
+    compute_stoi: true              # Short-Time Objective Intelligibility
+    compute_mcd: true               # Mel Cepstral Distortion
+    max_samples: 3                 # Max audio pairs to evaluate per epoch
+
+# -----------------------------------------------------------------------------
+# Sample Saving Configuration
+# -----------------------------------------------------------------------------
+sample_saving:
+  enabled: true
+  # Sample Type Control
+  # - save_segment_samples: 60s training segments (SampleSaver)
+  # - save_dialogue_samples: Complete dialogues with model inference (DialogueSampleSaver)
+  save_segment_samples: true   # Fast, lightweight segment samples
+  save_dialogue_samples: false # Complete dialogue with predictions (more expensive)
+
+  # Frequency and Limits
+  save_freq: 1
+  max_samples_per_split: 25    # Max segment sample sets per split
+  samples_per_save: 5          # Segments per save event
+  max_dialogues_per_split: 5   # Max complete dialogues per split
+
+  # Audio/Text Options
+  save_audio: true
+  save_text: true
+  audio_format: 'wav'
+  sample_rate: 24000
+
+# -----------------------------------------------------------------------------
+# Research Logging Configuration
+# -----------------------------------------------------------------------------
+research_logging:
+  enabled: true
+  save_attention_maps: true
+  attention_freq: 1
+  attention_samples: 2
+  save_raw_attention: false
+  save_loss_curves: true
+  save_codebook_stats: true
+  save_gradient_norms: true
+  generate_plots: true
+  plot_freq: 1
+  save_summary: true
+
+# =============================================================================
+# Configuration Summary (V3 - FULL-DUPLEX Mode)
+# =============================================================================
+#
+# Key Differences from V2:
+#   - enable_user_stream: false (V2 = true)
+#   - full_duplex_input: true (NEW in V3)
+#   - User audio = context only (not predicted)
+#   - Compatible with original Moshi inference
+#
+# Training Mode:
+#   - Input: 17 codebooks (1 text + 8 moshi + 8 user)
+#   - Output: dep_q=8 (Moshi audio only)
+#   - User audio provides conversational context but is not predicted
+#
+# Benefits of FULL-DUPLEX over USER-STREAM:
+#   - 100% compatible with original Moshi server
+#   - Simpler model (dep_q=8 vs dep_q=16)
+#   - Faster inference (no user audio generation)
+#   - Same as J-Moshi default training mode
+#
+# =============================================================================

@@ -1,0 +1,217 @@
+# =============================================================================
+# K-Moshi Korean Finetuning Configuration (UNIFIED SEGMENT FILTERING)
+# =============================================================================
+# This configuration uses the NEW unified segment_filtering system with 5 layers:
+#   Layer 1: Case Control - Structural validity (allow_case1..5)
+#   Layer 2: Quality - Hard minimums (min_moshi_words, etc.)
+#   Layer 3: Preferences - Probabilistic preferences (optional)
+#   Layer 4: Role Swapping - Data augmentation (2x data)
+#   Layer 5: Logging - Debug and statistics
+#
+# Key Benefits:
+#   - Single configuration section for all filtering
+#   - No duplicate options (min_moshi_words in one place)
+#   - Clear 5-layer hierarchy
+#   - Advanced logging with file output
+#
+# Usage:
+#   torchrun --nproc-per-node 4 -m train example/korean_unified.yaml
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Data Configuration
+# -----------------------------------------------------------------------------
+data:
+  train_data: './data/korean_train.jsonl'
+  eval_data: ''
+  shuffle: true
+
+# -----------------------------------------------------------------------------
+# Model Paths
+# -----------------------------------------------------------------------------
+moshi_paths:
+  hf_repo_id: null
+  moshi_path: '/path/to/model'
+  mimi_path: '/path/to/model'
+  tokenizer_path: '/path/to/model'
+  config_path: '/path/to/model'
+
+# -----------------------------------------------------------------------------
+# Korean Finetuning Configuration
+# -----------------------------------------------------------------------------
+korean:
+  enable_user_stream: true
+  initialized_model_path: './models/k-moshi-init'
+
+  korean_tokenizer_path: null
+  korean_tokenizer_type: 'sentencepiece'
+  retain_token_ids: [0, 3, 32000]
+
+  # Text-Audio Interleaver Configuration
+  interleaver:
+    keep_main_only: true
+    keep_and_shift: false
+    adaptive_distribute: true
+    warn_on_overflow: true
+    character_level_interpolation: true
+    main_speaker_label: 'SPEAKER_MAIN'
+
+  # ===========================================================================
+  # UNIFIED SEGMENT FILTERING (NEW - Replaces data_filtering + data_augmentation)
+  # ===========================================================================
+  segment_filtering:
+
+    # -------------------------------------------------------------------------
+    # Layer 1: Case Control (Structural Validity)
+    # -------------------------------------------------------------------------
+    # Controls which segment types are allowed based on stream presence:
+    # Case 1: moshi_audio + moshi_text + user_audio → Full dialogue
+    # Case 2: moshi_audio + moshi_text              → Moshi monologue
+    # Case 3: user_audio only                       → Skip (no Moshi content)
+    # Case 4: moshi_text + user_audio               → Skip (missing audio)
+    # Case 5: moshi_audio + user_audio              → Skip (missing text)
+    case_control:
+      enabled: true
+
+      # Explicit case control (set True to ALLOW, False to FILTER OUT)
+      allow_case1: true   # Full dialogue
+      allow_case2: true   # Moshi monologue (set false for dialogue-only training)
+      allow_case3: false  # User audio only (usually bad data)
+      allow_case4: false  # Missing Moshi audio (data corruption)
+      allow_case5: false  # Missing Moshi text (data corruption)
+
+      # Audio signal detection thresholds
+      min_audio_energy: 0.001           # Minimum RMS energy to detect audio
+      min_audio_presence_ratio: 0.05    # Minimum % of frames with audio
+
+    # -------------------------------------------------------------------------
+    # Layer 2: Quality Requirements (Hard Minimums)
+    # -------------------------------------------------------------------------
+    # Segments not meeting these requirements are always skipped.
+    quality:
+      enabled: true
+
+      # Moshi speech requirements
+      min_moshi_words: 3              # Minimum words Moshi must speak
+      min_moshi_duration_sec: 3.0     # Minimum Moshi speech duration
+      min_moshi_ratio: 0.1            # Minimum Moshi speech ratio (vs total)
+
+      # User speech requirements (set to 0 for MONOLOGUE training!)
+      min_user_words: 0               # Minimum words User must speak (0 = allow monologue)
+
+      # Segment duration requirements
+      min_segment_duration_sec: 10.0  # Minimum segment duration
+      max_segment_duration_sec: null  # Maximum segment duration (null = unlimited)
+
+    # -------------------------------------------------------------------------
+    # Layer 3: Preferences (Probabilistic)
+    # -------------------------------------------------------------------------
+    # Soft preferences that skip segments with a probability.
+    # Use for training data shaping without hard filtering.
+    preferences:
+      enabled: false  # Disabled by default (enable for advanced training)
+
+      # Prefer segments where Moshi speaks first
+      prefer_moshi_start: true
+      prefer_moshi_start_prob: 0.7    # Skip 70% of user-first segments
+
+      # Prefer segments with both speakers (for dialogue training)
+      prefer_both_speakers: false
+      prefer_both_speakers_prob: 0.5  # Skip 50% of single-speaker segments
+
+    # -------------------------------------------------------------------------
+    # Layer 4: Role Swapping (Data Augmentation)
+    # -------------------------------------------------------------------------
+    # Swaps Moshi↔User roles to create 2x training data.
+    # Audio: LEFT↔RIGHT channels
+    # Text: SPEAKER_MAIN↔other speaker labels
+    role_swapping:
+      enabled: true
+      probability: 1.0          # 100% swap probability when not yield_both
+      swap_audio: true          # Swap audio channels
+      swap_text: true           # Swap speaker labels in alignments
+      yield_both: true          # Yield BOTH original AND swapped (2x data)
+      recheck_after_swap: true  # Re-run Layer 1 check after swap
+
+    # -------------------------------------------------------------------------
+    # Layer 5: Logging and Debugging
+    # -------------------------------------------------------------------------
+    logging:
+      enabled: true
+      verbosity: 1  # 0=minimal, 1=summary, 2=detailed, 3=debug
+
+      # First event logging (quick debugging)
+      log_first_filter: true   # Log first filtered segment
+      log_first_pass: true     # Log first passed segment
+
+      # Per-layer logging (detailed debugging)
+      log_case_detection: false   # Log each case detection
+      log_quality_checks: false   # Log each quality check
+      log_role_swapping: false    # Log each swap operation
+
+      # Summary logging
+      log_epoch_summary: true     # Log statistics at epoch end
+
+      # File output
+      save_to_file: true
+      log_filename: 'segment_filtering.log'
+
+# -----------------------------------------------------------------------------
+# Training Mode Configuration
+# -----------------------------------------------------------------------------
+full_finetuning: true
+lora:
+  enable: false
+  rank: 64
+  scaling: 2.0
+  ft_embed: false
+
+distributed_backend: fsdp
+
+# -----------------------------------------------------------------------------
+# Loss Configuration
+# -----------------------------------------------------------------------------
+first_codebook_weight_multiplier: 100.0
+text_padding_weight: 0.5
+
+user_semantic_weight: null
+user_acoustic_weight: null
+user_stream_loss_ratio: 1.0
+
+# -----------------------------------------------------------------------------
+# Training Hyperparameters
+# -----------------------------------------------------------------------------
+duration_sec: 60
+batch_size: 2
+num_microbatches: 4
+max_steps: 10000
+max_norm: 1.0
+gradient_checkpointing: true
+
+optim:
+  lr: 1.0e-5
+  weight_decay: 0.1
+  pct_start: 0.05
+
+param_dtype: bfloat16
+
+# -----------------------------------------------------------------------------
+# Checkpointing & Logging
+# -----------------------------------------------------------------------------
+seed: 42
+log_freq: 10
+eval_freq: 500
+do_eval: false
+
+do_ckpt: true
+ckpt_freq: 500
+save_adapters: false
+num_ckpt_keep: 3
+
+run_dir: './runs/korean_unified_v1'
+overwrite_run_dir: false
+
+wandb:
+  project: 'k-moshi'
+  run_name: 'korean-unified-v1'
+  offline: true

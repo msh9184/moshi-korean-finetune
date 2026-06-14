@@ -1,0 +1,675 @@
+
+● 완벽한 정보입니다! 이제 전체 그림이 명확해졌습니다. 특히 DailyTalk이 word-level alignment를 사용한다는 점이 매우 중요한 발견입니다.
+
+● ---
+  🏗️ Korean Moshi Dataset Preparation Project - 완전 설계
+
+  1. 데이터 현황 종합
+
+  ┌─────────────────────────────────────────────────────────────────────────────┐
+  │                       Korean Broadcast Dataset Overview                      │
+  ├─────────────────────────────────────────────────────────────────────────────┤
+  │                                                                             │
+  │  📊 Dataset Statistics                                                       │
+  │  ─────────────────────────────────────────────────────────────────────────  │
+  │                                                                             │
+  │  ┌───────────────────────────────────────────────────────────────────────┐  │
+  │  │ Subset                          │ Hours   │ Conversations │ Utterances│  │
+  │  ├───────────────────────────────────────────────────────────────────────┤  │
+  │  │ broadcast-key463-839g-train     │ 8,010.1 │ 16,326        │ 5,884,143 │  │
+  │  │ broadcast-key463-839g-valid     │ 1,017.8 │  2,129        │   696,158 │  │
+  │  │ broadcast-key71314-559g-train   │ 5,603.6 │ 10,416        │ 3,224,493 │  │
+  │  │ broadcast-key71314-559g-valid   │   657.7 │  1,279        │   408,025 │  │
+  │  ├───────────────────────────────────────────────────────────────────────┤  │
+  │  │ TOTAL                           │15,289.2 │ 30,150        │10,212,819 │  │
+  │  └───────────────────────────────────────────────────────────────────────┘  │
+  │                                                                             │
+  │  📁 Source Format: Lhotse Shar                                              │
+  │  ├── cuts.XXXXXX.jsonl.gz  (metadata + supervisions)                       │
+  │  └── recording.XXXXXX.tar  (FLAC audio, 16kHz mono)                        │
+  │                                                                             │
+  │  ⚠️  Critical Finding: DailyTalk uses WORD-LEVEL alignment                  │
+  │      → We MUST convert sentence-level to word-level for optimal training    │
+  │                                                                             │
+  └─────────────────────────────────────────────────────────────────────────────┘
+
+  2. 목표 출력 형식 (General + Moshi Compatible)
+
+  ┌─────────────────────────────────────────────────────────────────────────────┐
+  │                         Target Output Format                                 │
+  ├─────────────────────────────────────────────────────────────────────────────┤
+  │                                                                             │
+  │  📁 /path/to/data                        │
+  │  │                                                                          │
+  │  ├── 📁 train/                                                              │
+  │  │   ├── 📁 audio/                                                          │
+  │  │   │   ├── AHAAA21000001.flac  (16kHz, STEREO)                           │
+  │  │   │   │   ├── Channel 0 (L): SPEAKER_MAIN                               │
+  │  │   │   │   └── Channel 1 (R): SPEAKER_USER                               │
+  │  │   │   ├── AHAAA21000002.flac                                            │
+  │  │   │   └── ...                                                            │
+  │  │   │                                                                      │
+  │  │   ├── 📁 alignment/                                                      │
+  │  │   │   ├── AHAAA21000001.json  (Moshi format, word-level)                │
+  │  │   │   │   └── {"alignments": [["안녕", [0.0, 0.4], "SPEAKER_MAIN"],...]} │
+  │  │   │   ├── AHAAA21000002.json                                            │
+  │  │   │   └── ...                                                            │
+  │  │   │                                                                      │
+  │  │   ├── 📁 metadata/                                                       │
+  │  │   │   ├── AHAAA21000001.json  (Full metadata, all speakers)             │
+  │  │   │   │   └── {                                                          │
+  │  │   │   │         "id": "AHAAA21000001",                                   │
+  │  │   │   │         "duration": 1197.22,                                     │
+  │  │   │   │         "speaker_main": "AH0001",                                │
+  │  │   │   │         "speaker_user": ["AH0002"],                              │
+  │  │   │   │         "supervisions": [...all original data...],              │
+  │  │   │   │         "source": "aihub-broadcast-key463"                       │
+  │  │   │   │       }                                                          │
+  │  │   │   └── ...                                                            │
+  │  │   │                                                                      │
+  │  │   └── 📄 manifest.jsonl  (Moshi training format)                        │
+  │  │       └── {"path": "audio/AHAAA21000001.flac", "duration": 1197.22}     │
+  │  │                                                                          │
+  │  ├── 📁 valid/                                                              │
+  │  │   └── (same structure as train)                                         │
+  │  │                                                                          │
+  │  └── 📄 dataset_info.json  (Overall statistics)                            │
+  │                                                                             │
+  └─────────────────────────────────────────────────────────────────────────────┘
+
+  3. 프로젝트 구조 설계
+
+  ┌─────────────────────────────────────────────────────────────────────────────┐
+  │                    Project Directory Structure                               │
+  ├─────────────────────────────────────────────────────────────────────────────┤
+  │                                                                             │
+  │  📁 moshi-finetune/                                                         │
+  │  │                                                                          │
+  │  └── 📁 data_preparation/                   # 새로 생성할 디렉토리          │
+  │      │                                                                      │
+  │      ├── 📄 __init__.py                                                     │
+  │      │                                                                      │
+  │      ├── 📁 readers/                        # 소스 데이터 리더              │
+  │      │   ├── 📄 __init__.py                                                 │
+  │      │   ├── 📄 lhotse_shar.py             # Lhotse Shar 포맷 리더         │
+  │      │   └── 📄 base.py                    # 추상 베이스 클래스            │
+  │      │                                                                      │
+  │      ├── 📁 processors/                     # 데이터 처리 모듈              │
+  │      │   ├── 📄 __init__.py                                                 │
+  │      │   ├── 📄 speaker_selector.py        # SPEAKER_MAIN 선정            │
+  │      │   ├── 📄 stereo_converter.py        # Mono → Stereo 변환           │
+  │      │   ├── 📄 alignment_generator.py     # Word-level alignment (Whisper)│
+  │      │   └── 📄 audio_processor.py         # 오디오 전처리                 │
+  │      │                                                                      │
+  │      ├── 📁 writers/                        # 출력 포맷 라이터              │
+  │      │   ├── 📄 __init__.py                                                 │
+  │      │   ├── 📄 moshi_format.py            # Moshi 학습 형식 출력          │
+  │      │   └── 📄 metadata_writer.py         # 전체 메타데이터 저장          │
+  │      │                                                                      │
+  │      ├── 📁 pipeline/                       # 파이프라인 오케스트레이션     │
+  │      │   ├── 📄 __init__.py                                                 │
+  │      │   ├── 📄 orchestrator.py            # 메인 파이프라인               │
+  │      │   └── 📄 parallel.py                # 병렬 처리 유틸리티            │
+  │      │                                                                      │
+  │      ├── 📁 configs/                        # 설정 파일                     │
+  │      │   ├── 📄 korean_broadcast.yaml      # 한국어 방송 데이터 설정       │
+  │      │   └── 📄 default.yaml               # 기본 설정                     │
+  │      │                                                                      │
+  │      ├── 📁 scripts/                        # 실행 스크립트                 │
+  │      │   ├── 📄 prepare_korean_dataset.py  # 메인 CLI 스크립트             │
+  │      │   ├── 📄 validate_dataset.py        # 데이터셋 검증                 │
+  │      │   └── 📄 analyze_source.py          # 소스 데이터 분석              │
+  │      │                                                                      │
+  │      └── 📁 tests/                          # 테스트 코드                   │
+  │          ├── 📄 test_readers.py                                             │
+  │          ├── 📄 test_processors.py                                          │
+  │          └── 📄 test_pipeline.py                                            │
+  │                                                                             │
+  └─────────────────────────────────────────────────────────────────────────────┘
+
+  4. 핵심 처리 파이프라인
+
+  ┌─────────────────────────────────────────────────────────────────────────────┐
+  │                      Data Processing Pipeline                                │
+  ├─────────────────────────────────────────────────────────────────────────────┤
+  │                                                                             │
+  │  ┌─────────────────────────────────────────────────────────────────────┐   │
+  │  │ STAGE 1: Source Reading                                              │   │
+  │  │ ─────────────────────────────────────────────────────────────────── │   │
+  │  │                                                                      │   │
+  │  │  cuts.XXXXXX.jsonl.gz ──┐                                           │   │
+  │  │                         ├──► LhotseSharReader ──► ConversationData  │   │
+  │  │  recording.XXXXXX.tar ──┘                                           │   │
+  │  │                                                                      │   │
+  │  │  Output: {                                                           │   │
+  │  │    "id": str,                                                        │   │
+  │  │    "audio": np.ndarray (mono, 16kHz),                               │   │
+  │  │    "supervisions": [                                                 │   │
+  │  │      {"speaker": str, "start": float, "duration": float, "text": str}│   │
+  │  │    ],                                                                │   │
+  │  │    "metadata": {...}                                                 │   │
+  │  │  }                                                                   │   │
+  │  └────────────────────────────────┬────────────────────────────────────┘   │
+  │                                   ▼                                         │
+  │  ┌─────────────────────────────────────────────────────────────────────┐   │
+  │  │ STAGE 2: Speaker Selection                                           │   │
+  │  │ ─────────────────────────────────────────────────────────────────── │   │
+  │  │                                                                      │   │
+  │  │  Algorithm: Hybrid Score                                             │   │
+  │  │  score = 0.6 × norm_duration + 0.4 × norm_turn_count                │   │
+  │  │                                                                      │   │
+  │  │  Input: supervisions                                                 │   │
+  │  │  Output: {                                                           │   │
+  │  │    "speaker_main": "AH0001",                                        │   │
+  │  │    "speaker_user": ["AH0002", ...],                                 │   │
+  │  │    "main_supervisions": [...],                                      │   │
+  │  │    "user_supervisions": [...]                                       │   │
+  │  │  }                                                                   │   │
+  │  └────────────────────────────────┬────────────────────────────────────┘   │
+  │                                   ▼                                         │
+  │  ┌─────────────────────────────────────────────────────────────────────┐   │
+  │  │ STAGE 3: Stereo Conversion                                           │   │
+  │  │ ─────────────────────────────────────────────────────────────────── │   │
+  │  │                                                                      │   │
+  │  │  Mono Audio + Speaker Timestamps ──► Stereo Audio                   │   │
+  │  │                                                                      │   │
+  │  │  ┌──────────────────────────────────────────────────────────────┐   │   │
+  │  │  │ for each supervision:                                         │   │   │
+  │  │  │   segment = audio[start:end]                                  │   │   │
+  │  │  │   if speaker == SPEAKER_MAIN:                                 │   │   │
+  │  │  │     left_channel[start:end] = segment                         │   │   │
+  │  │  │     right_channel[start:end] = silence (or attenuated)        │   │   │
+  │  │  │   else:                                                       │   │   │
+  │  │  │     left_channel[start:end] = silence (or attenuated)         │   │   │
+  │  │  │     right_channel[start:end] = segment                        │   │   │
+  │  │  └──────────────────────────────────────────────────────────────┘   │   │
+  │  │                                                                      │   │
+  │  │  Output: stereo_audio [2, num_samples]                              │   │
+  │  └────────────────────────────────┬────────────────────────────────────┘   │
+  │                                   ▼                                         │
+  │  ┌─────────────────────────────────────────────────────────────────────┐   │
+  │  │ STAGE 4: Word-Level Alignment Generation                             │   │
+  │  │ ─────────────────────────────────────────────────────────────────── │   │
+  │  │                                                                      │   │
+  │  │  Input: SPEAKER_MAIN audio segments + sentence texts                │   │
+  │  │                                                                      │   │
+  │  │  Method: Whisper-timestamped (Korean)                               │   │
+  │  │  ┌──────────────────────────────────────────────────────────────┐   │   │
+  │  │  │ for each main_supervision:                                    │   │   │
+  │  │  │   segment_audio = extract_segment(audio, start, end)          │   │   │
+  │  │  │   result = whisper.transcribe(segment_audio, language="ko")   │   │   │
+  │  │  │   for word in result["words"]:                                │   │   │
+  │  │  │     alignments.append([                                       │   │   │
+  │  │  │       word["text"],                                           │   │   │
+  │  │  │       [word["start"] + offset, word["end"] + offset],         │   │   │
+  │  │  │       "SPEAKER_MAIN"                                          │   │   │
+  │  │  │     ])                                                        │   │   │
+  │  │  └──────────────────────────────────────────────────────────────┘   │   │
+  │  │                                                                      │   │
+  │  │  Fallback: If Whisper fails, use sentence-level with estimation    │   │
+  │  └────────────────────────────────┬────────────────────────────────────┘   │
+  │                                   ▼                                         │
+  │  ┌─────────────────────────────────────────────────────────────────────┐   │
+  │  │ STAGE 5: Output Generation                                           │   │
+  │  │ ─────────────────────────────────────────────────────────────────── │   │
+  │  │                                                                      │   │
+  │  │  1. Write stereo FLAC: audio/{id}.flac                              │   │
+  │  │  2. Write Moshi alignment: alignment/{id}.json                      │   │
+  │  │  3. Write full metadata: metadata/{id}.json                         │   │
+  │  │  4. Append to manifest.jsonl                                        │   │
+  │  │                                                                      │   │
+  │  └─────────────────────────────────────────────────────────────────────┘   │
+  │                                                                             │
+  └─────────────────────────────────────────────────────────────────────────────┘
+
+  5. 성능 및 리소스 고려사항
+
+  ┌─────────────────────────────────────────────────────────────────────────────┐
+  │                    Performance & Resource Considerations                     │
+  ├─────────────────────────────────────────────────────────────────────────────┤
+  │                                                                             │
+  │  📊 Estimated Processing Requirements                                        │
+  │  ─────────────────────────────────────────────────────────────────────────  │
+  │                                                                             │
+  │  Total Data: 15,289 hours = 55,040,400 seconds                              │
+  │                                                                             │
+  │  ┌─────────────────────────────────────────────────────────────────────┐   │
+  │  │ Processing Stage          │ Time/Conv │ Total Est. │ Parallelizable │   │
+  │  ├─────────────────────────────────────────────────────────────────────┤   │
+  │  │ 1. Shar Reading           │ ~1s       │ ~8h        │ ✅ High        │   │
+  │  │ 2. Speaker Selection      │ ~0.1s     │ ~1h        │ ✅ High        │   │
+  │  │ 3. Stereo Conversion      │ ~5s       │ ~42h       │ ✅ High        │   │
+  │  │ 4. Whisper Alignment      │ ~60s*     │ ~500h      │ ⚠️ GPU needed  │   │
+  │  │ 5. Output Writing         │ ~3s       │ ~25h       │ ✅ High        │   │
+  │  └─────────────────────────────────────────────────────────────────────┘   │
+  │  * Whisper on GPU: ~1x real-time = 평균 1800초 대화에 ~30분 소요            │
+  │                                                                             │
+  │  💾 Storage Estimates                                                        │
+  │  ─────────────────────────────────────────────────────────────────────────  │
+  │  │                                                                          │
+  │  │ Stereo FLAC (16kHz): ~1.2x mono size ≈ 1.5TB                            │
+  │  │ Alignment JSON: ~50 bytes/word × 10M words ≈ 500MB                      │
+  │  │ Metadata JSON: ~2KB/conv × 30K ≈ 60MB                                   │
+  │  │ Total: ~1.6TB                                                           │
+  │                                                                             │
+  │  ⚡ Optimization Strategies                                                  │
+  │  ─────────────────────────────────────────────────────────────────────────  │
+  │                                                                             │
+  │  1. Multi-process parallel processing (CPU stages)                         │
+  │  2. Batch Whisper inference on GPU                                         │
+  │  3. Streaming I/O to minimize memory usage                                 │
+  │  4. Resume capability for long-running jobs                                │
+  │  5. Progressive output (don't wait for all to complete)                    │
+  │                                                                             │
+  │  🔧 Recommended Execution                                                    │
+  │  ─────────────────────────────────────────────────────────────────────────  │
+  │                                                                             │
+  │  Option A: Full Pipeline (GPU available)                                    │
+  │  - 64 CPU workers for I/O                                                  │
+  │  - 1 A100 GPU for Whisper                                                  │
+  │  - Estimated time: ~3-4 days                                               │
+  │                                                                             │
+  │  Option B: Two-Phase (Faster start)                                        │
+  │  - Phase 1: Stereo conversion only (no word-level) → ~2 days              │
+  │  - Phase 2: Word-level alignment (can run in background) → +3 days        │
+  │  - Benefit: Can start training with sentence-level while generating       │
+  │                                                                             │
+  └─────────────────────────────────────────────────────────────────────────────┘
+
+  6. 완성도 향상을 위한 추가 고려사항
+
+  ┌─────────────────────────────────────────────────────────────────────────────┐
+  │                    Quality Enhancement Considerations                        │
+  ├─────────────────────────────────────────────────────────────────────────────┤
+  │                                                                             │
+  │  ✅ 필수 구현 항목                                                           │
+  │  ─────────────────────────────────────────────────────────────────────────  │
+  │  1. Robust error handling with resume capability                           │
+  │  2. Progress logging and ETA estimation                                    │
+  │  3. Data validation at each stage                                          │
+  │  4. Checkpointing for long-running jobs                                    │
+  │  5. Memory-efficient streaming for large files                             │
+  │                                                                             │
+  │  ⭐ 품질 향상 항목                                                           │
+  │  ─────────────────────────────────────────────────────────────────────────  │
+  │  1. Audio quality checks (SNR, clipping detection)                         │
+  │  2. Silence detection and handling (VAD)                                   │
+  │  3. Overlap detection and resolution                                       │
+  │  4. Whisper confidence thresholding                                        │
+  │  5. Fallback strategies for alignment failures                             │
+  │                                                                             │
+  │  📋 Optional but Recommended                                                 │
+  │  ─────────────────────────────────────────────────────────────────────────  │
+  │  1. Statistics collection and reporting                                    │
+  │  2. Sample visualization tools                                             │
+  │  3. A/B comparison with DailyTalk format                                   │
+  │  4. Unit tests for critical components                                     │
+  │                                                                             │
+  └─────────────────────────────────────────────────────────────────────────────┘
+
+  ---
+  7. 구현 계획
+
+  이제 코드 구현을 시작할 준비가 되었습니다. 다음 순서로 진행하겠습니다:
+
+  | 순서 | 모듈                              | 설명                         | 예상 코드량 |
+  |------|-----------------------------------|------------------------------|-------------|
+  | 1    | 프로젝트 구조                     | 디렉토리 및 __init__.py 생성 | ~100 lines  |
+  | 2    | readers/lhotse_shar.py            | Shar 포맷 리더               | ~200 lines  |
+  | 3    | processors/speaker_selector.py    | SPEAKER_MAIN 선정            | ~100 lines  |
+  | 4    | processors/stereo_converter.py    | Mono→Stereo 변환             | ~150 lines  |
+  | 5    | processors/alignment_generator.py | Whisper word-level           | ~250 lines  |
+  | 6    | writers/moshi_format.py           | 출력 포맷 작성               | ~150 lines  |
+  | 7    | pipeline/orchestrator.py          | 메인 파이프라인              | ~300 lines  |
+  | 8    | scripts/prepare_korean_dataset.py | CLI 스크립트                 | ~150 lines  |
+  | 9    | configs/korean_broadcast.yaml     | 설정 파일                    | ~50 lines   |
+
+  총 예상: ~1,450 lines
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+이렇게 처리되고 나서 만들어지는 결과물과 이 들을 바탕으로 NFA 를 사용해 최종 결과물까지 만들어지는 프로세스에 대해 설명해줘. 
+
+● Korean Moshi Data Preparation Pipeline 분석
+
+  전체 파이프라인 아키텍처
+
+  ┌─────────────────────────────────────────────────────────────────────────────────┐
+  │                         Korean Moshi Finetuning Pipeline                        │
+  ├─────────────────────────────────────────────────────────────────────────────────┤
+  │                                                                                 │
+  │  ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────────────────┐ │
+  │  │   Phase 1       │    │     Merge       │    │         Phase 2             │ │
+  │  │   (20 CPUs)     │───▶│   Results       │───▶│         (GPU)               │ │
+  │  │                 │    │                 │    │                             │ │
+  │  │ • Stereo FLAC   │    │ • Validation    │    │ • NFA Alignment             │ │
+  │  │ • Metadata JSON │    │ • Deduplication │    │ • Word Timestamps           │ │
+  │  │ • Manifest JSONL│    │ • Stats Merge   │    │ • Final Manifest            │ │
+  │  └─────────────────┘    └─────────────────┘    └─────────────────────────────┘ │
+  │                                                                                 │
+  │  Source: AIHub Korean     Output: Moshi Format     Final: Training-Ready Data  │
+  │  ~15,289 hours            16kHz Stereo FLAC        + Word-level Alignments     │
+  │                                                                                 │
+  └─────────────────────────────────────────────────────────────────────────────────┘
+
+  ---
+  Phase 1: CPU 분산 처리 (20대 머신)
+
+  실행 명령어 (각 머신별)
+
+  # GPU 서버에서 실행 (machine 0~19)
+  cd /path/to/workspace
+
+  # 각 머신별 스크립트 실행
+  bash data_preparation/scripts/run_machine_000.sh  # Machine 0
+  bash data_preparation/scripts/run_machine_001.sh  # Machine 1
+  # ...
+  bash data_preparation/scripts/run_machine_019.sh  # Machine 19
+
+  Phase 1 출력 구조
+
+  /path/to/data
+  └── aihub-broadcast-key463-839g/
+      └── train/
+          ├── audio/                          # Stereo FLAC files (16kHz)
+          │   ├── conv_00001.flac             # L=SPEAKER_MAIN, R=SPEAKER_USER
+          │   ├── conv_00002.flac
+          │   └── ...
+          │
+          ├── metadata/                       # Rich JSON metadata (Phase 2용)
+          │   ├── conv_00001.json             # 발화 텍스트, 타임스탬프, 화자 정보
+          │   ├── conv_00002.json
+          │   └── ...
+          │
+          ├── .checkpoints/                   # 분산 처리 체크포인트
+          │   ├── machine_000.json            # Machine 0 진행상황
+          │   ├── machine_001.json
+          │   ├── manifest_000.jsonl          # Machine 0 manifest
+          │   ├── manifest_001.jsonl
+          │   └── ...
+          │
+          └── segment_alignment/              # Segment-level alignment
+              ├── conv_00001.json
+              └── ...
+
+  Metadata JSON 구조 (NFA에서 사용할 transcript 포함)
+
+  {
+    "conversation_id": "conv_00001",
+    "duration": 125.5,
+    "speakers": {
+      "main": {"id": "SPK001", "total_duration": 65.2},
+      "user": {"id": "SPK002", "total_duration": 48.3}
+    },
+    "segments": {
+      "main": [
+        {"start": 0.0, "end": 3.5, "text": "안녕하세요 반갑습니다"},
+        {"start": 8.2, "end": 12.1, "text": "오늘 날씨가 좋네요"}
+      ],
+      "user": [
+        {"start": 4.0, "end": 7.8, "text": "네 저도 반가워요"},
+        {"start": 12.5, "end": 15.2, "text": "정말 좋아요"}
+      ]
+    }
+  }
+
+  ---
+  Merge Phase: 결과 병합
+
+  실행 명령어
+
+  cd /path/to/workspace
+
+  # 1. 먼저 완료 상태 확인 (--verify-only)
+  python data_preparation/scripts/merge_phase1_results.py \
+      --total-machines 20 \
+      --verify-only
+
+  # 2. 실제 병합 실행
+  python data_preparation/scripts/merge_phase1_results.py \
+      --total-machines 20
+
+  # 옵션들:
+  #   --dataset <name>     : 특정 데이터셋만 병합
+  #   --force              : 일부 머신 미완료시에도 강제 병합
+  #   --no-validate        : 검증 스킵 (빠른 병합)
+  #   --output-report <path>: 상세 리포트 저장
+
+  Merge 과정
+
+  ┌──────────────────────────────────────────────────────────────────┐
+  │                      Merge Process Flow                          │
+  ├──────────────────────────────────────────────────────────────────┤
+  │                                                                  │
+  │  ┌─────────────┐   ┌─────────────┐       ┌─────────────┐        │
+  │  │manifest_000 │   │manifest_001 │  ...  │manifest_019 │        │
+  │  └──────┬──────┘   └──────┬──────┘       └──────┬──────┘        │
+  │         │                 │                     │                │
+  │         └────────────┬────┴─────────────────────┘                │
+  │                      ▼                                           │
+  │         ┌────────────────────────┐                               │
+  │         │  Deduplication Check   │  ◀── conversation_id 기준     │
+  │         └───────────┬────────────┘                               │
+  │                     ▼                                            │
+  │         ┌────────────────────────┐                               │
+  │         │   Validation Check     │  ◀── 파일 존재, 포맷 검증     │
+  │         └───────────┬────────────┘                               │
+  │                     ▼                                            │
+  │         ┌────────────────────────┐                               │
+  │         │   manifest.jsonl       │  ◀── 최종 통합 manifest       │
+  │         │   merged_stats.json    │  ◀── 통합 통계                │
+  │         │   merge_report.json    │  ◀── 병합 리포트              │
+  │         └────────────────────────┘                               │
+  │                                                                  │
+  └──────────────────────────────────────────────────────────────────┘
+
+  Merge 후 출력 구조
+
+  /path/to/data
+  └── aihub-broadcast-key463-839g/
+      └── train/
+          ├── audio/                    # (Phase 1에서 생성됨)
+          ├── metadata/                 # (Phase 1에서 생성됨)
+          ├── segment_alignment/        # (Phase 1에서 생성됨)
+          │
+          ├── manifest.jsonl            # ★ 통합 manifest (Phase 2 입력)
+          ├── merged_stats.json         # 전체 통계
+          └── merge_report.json         # 병합 상세 리포트
+
+  manifest.jsonl 형식
+
+  {"conversation_id": "conv_00001", "audio": "audio/conv_00001.flac", "duration": 125.5, "segment_alignment": "segment_alignment/conv_00001.json"}
+  {"conversation_id": "conv_00002", "audio": "audio/conv_00002.flac", "duration": 89.2, "segment_alignment": "segment_alignment/conv_00002.json"}
+
+  ---
+  Phase 2: NFA Word-level Alignment (GPU)
+
+  실행 명령어
+
+  cd /path/to/workspace
+
+  # 1. Dry-run으로 먼저 확인
+  python data_preparation/scripts/run_phase2.py \
+      --aligner nfa \
+      --nfa-model nvidia/stt_ko_conformer_ctc_large \
+      --gpus 0,1,2,3,4,5,6,7 \
+      --dry-run
+
+  # 2. 실제 실행
+  python data_preparation/scripts/run_phase2.py \
+      --aligner nfa \
+      --nfa-model nvidia/stt_ko_conformer_ctc_large \
+      --gpus 0,1,2,3,4,5,6,7
+
+  # 옵션들:
+  #   --aligner nfa|whisper  : 정렬 방식 선택 (기본: nfa)
+  #   --nfa-model <path>     : NFA 모델 (HuggingFace 또는 로컬 .nemo)
+  #   --single-gpu --gpu 0   : 단일 GPU 모드 (테스트용)
+  #   --dataset <name>       : 특정 데이터셋만 처리
+
+  NFA 처리 흐름
+
+  ┌──────────────────────────────────────────────────────────────────────────────┐
+  │                         NFA Alignment Process                                 │
+  ├──────────────────────────────────────────────────────────────────────────────┤
+  │                                                                              │
+  │   Input                         Processing                      Output       │
+  │   ─────                         ──────────                      ──────       │
+  │                                                                              │
+  │  ┌─────────────┐              ┌──────────────────┐                          │
+  │  │ Stereo FLAC │──────────────▶│ Channel Split    │                          │
+  │  │ (L/R)       │              │ L → SPEAKER_MAIN │                          │
+  │  └─────────────┘              │ R → SPEAKER_USER │                          │
+  │                               └────────┬─────────┘                          │
+  │                                        │                                     │
+  │  ┌─────────────┐              ┌────────▼─────────┐                          │
+  │  │ Metadata    │──────────────▶│ Transcript Load  │                          │
+  │  │ (text)      │              │ main_transcript  │                          │
+  │  └─────────────┘              │ user_transcript  │                          │
+  │                               └────────┬─────────┘                          │
+  │                                        │                                     │
+  │  ┌─────────────┐              ┌────────▼─────────┐     ┌──────────────────┐ │
+  │  │ Korean CTC  │──────────────▶│ NFA Forced       │────▶│ alignment_       │ │
+  │  │ Model       │              │ Alignment        │     │ speaker01.json   │ │
+  │  │ (Conformer) │              │                  │     │ alignment_       │ │
+  │  └─────────────┘              │ Audio + Text     │     │ speaker02.json   │ │
+  │                               │ → Word Timestamps│     └──────────────────┘ │
+  │                               └──────────────────┘                          │
+  │                                                                              │
+  └──────────────────────────────────────────────────────────────────────────────┘
+
+  Phase 2 최종 출력 구조
+
+  /path/to/data
+  └── aihub-broadcast-key463-839g/
+      └── train/
+          ├── audio/                        # Stereo FLAC (16kHz)
+          │   └── conv_00001.flac
+          │
+          ├── metadata/                     # Phase 1 metadata
+          │   └── conv_00001.json
+          │
+          ├── segment_alignment/            # Segment-level (Phase 1)
+          │   └── conv_00001.json
+          │
+          ├── alignment_speaker01/          # ★ Word-level (SPEAKER_MAIN)
+          │   └── conv_00001.json
+          │
+          ├── alignment_speaker02/          # ★ Word-level (SPEAKER_USER)
+          │   └── conv_00001.json
+          │
+          ├── manifest.jsonl                # Phase 1 manifest
+          └── manifest_phase2.jsonl         # ★ Phase 2 manifest (최종)
+
+  Word-level Alignment JSON 형식
+
+  {
+    "speaker": "SPEAKER_MAIN",
+    "words": [
+      {"text": "안녕하세요", "start": 0.12, "end": 0.85, "confidence": 0.95},
+      {"text": "반갑습니다", "start": 0.92, "end": 1.45, "confidence": 0.93}
+    ],
+    "total_duration": 65.2,
+    "confidence": 0.94
+  }
+
+  ---
+  전체 실행 순서 요약
+
+  # ═══════════════════════════════════════════════════════════════════
+  # GPU 서버에서 실행 (/path/to/workspace)
+  # ═══════════════════════════════════════════════════════════════════
+
+  # ─────────────────────────────────────────────────────────────────────
+  # STEP 1: Phase 1 - 20개 CPU 분산 처리 (각 머신에서 개별 실행)
+  # ─────────────────────────────────────────────────────────────────────
+  bash data_preparation/scripts/run_machine_XXX.sh  # XXX = 000~019
+
+  # ─────────────────────────────────────────────────────────────────────
+  # STEP 2: 완료 확인 및 병합
+  # ─────────────────────────────────────────────────────────────────────
+  # 2-1. 상태 확인
+  python data_preparation/scripts/merge_phase1_results.py \
+      --total-machines 20 \
+      --verify-only
+
+  # 2-2. 병합 실행
+  python data_preparation/scripts/merge_phase1_results.py \
+      --total-machines 20
+
+  # ─────────────────────────────────────────────────────────────────────
+  # STEP 3: Phase 2 - NFA Word-level Alignment (GPU)
+  # ─────────────────────────────────────────────────────────────────────
+  # 3-1. Dry-run 확인
+  python data_preparation/scripts/run_phase2.py \
+      --aligner nfa \
+      --gpus 0,1,2,3,4,5,6,7 \
+      --dry-run
+
+  # 3-2. 실행
+  python data_preparation/scripts/run_phase2.py \
+      --aligner nfa \
+      --nfa-model nvidia/stt_ko_conformer_ctc_large \
+      --gpus 0,1,2,3,4,5,6,7
+
+  ---
+  데이터 흐름 다이어그램
+
+  AIHub Korean Broadcast Data (~15,289 hours)
+                  │
+                  ▼
+  ┌───────────────────────────────────────┐
+  │         Phase 1 (20 CPU Machines)     │
+  │  • Speaker selection (MAIN/USER)      │
+  │  • Stereo FLAC generation (16kHz)     │
+  │  • Metadata extraction (transcripts)  │
+  │  • Round-robin shard assignment       │
+  └───────────────────────────────────────┘
+                  │
+                  ▼
+  ┌───────────────────────────────────────┐
+  │         Merge Phase                   │
+  │  • Manifest deduplication             │
+  │  • Validation & integrity check       │
+  │  • Statistics aggregation             │
+  └───────────────────────────────────────┘
+                  │
+                  ▼
+  ┌───────────────────────────────────────┐
+  │         Phase 2 (GPU - NFA)           │
+  │  • Load transcripts from metadata     │
+  │  • CTC-based forced alignment         │
+  │  • Word-level timestamp extraction    │
+  │  • Quality scoring                    │
+  └───────────────────────────────────────┘
+                  │
+                  ▼
+  ┌───────────────────────────────────────┐
+  │    Training-Ready Moshi Format        │
+  │  • Stereo FLAC (L=MAIN, R=USER)       │
+  │  • Word-level alignments (JSON)       │
+  │  • Final manifest (JSONL)             │
+  └───────────────────────────────────────┘
+                  │
+                  ▼
+          Moshi Finetuning Training

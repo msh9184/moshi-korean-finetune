@@ -1,0 +1,368 @@
+# =============================================================================
+# K-Moshi Evaluation Configuration with Speaker Conditioning
+# =============================================================================
+# This configuration is optimized for EVALUATION and INFERENCE with speaker
+# conditioning. Key differences from training config:
+#
+# 1. DETERMINISTIC Reference Sampling:
+#    - sample_strategy: "start" (always from position 0)
+#    - deterministic: true (no random number generation)
+#    - fixed_duration_sec: 10.0 (consistent reference length)
+#
+# 2. Reproducibility Guarantees:
+#    - Same input audio → Same reference segment → Same speaker embedding
+#    - Full metadata saved for experiment reproduction
+#
+# 3. Evaluation Focus:
+#    - eval_samples configured for thorough evaluation
+#    - sample_saving enabled for qualitative analysis
+#    - Speaker conditioning metadata saved with each sample
+#
+# Usage:
+#   torchrun --nproc-per-node 1 -m train example/korean_eval_speaker_cond.yaml
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Data Configuration (Evaluation Data)
+# -----------------------------------------------------------------------------
+data:
+  train_data: './data/korean_v4_train.jsonl'  # Required but minimal samples
+  eval_data: './data/korean_v4_valid.jsonl'   # Primary evaluation data
+  shuffle: false  # Deterministic evaluation order
+
+# -----------------------------------------------------------------------------
+# MODEL PATHS
+# -----------------------------------------------------------------------------
+moshi_paths:
+  hf_repo_id: null
+  moshi_path: '/path/to/model'
+  mimi_path: '/path/to/model'
+  tokenizer_path: '/path/to/workspace'
+  config_path: '/path/to/model'
+
+# -----------------------------------------------------------------------------
+# MODULAR BACKBONE CONFIGURATION
+# -----------------------------------------------------------------------------
+backbone:
+  type: "moshi"
+  moshi:
+    hidden_dim: 4096
+    num_layers: 32
+    num_heads: 32
+    gradient_checkpointing: false  # Faster inference without checkpointing
+
+# -----------------------------------------------------------------------------
+# Korean Finetuning Configuration
+# -----------------------------------------------------------------------------
+korean:
+  enable_user_stream: false
+  full_duplex_input: true
+  initialized_model_path: null
+
+  korean_tokenizer_path: null
+  korean_tokenizer_type: 'sentencepiece'
+  retain_token_ids: [0, 3, 32000]
+
+  interleaver:
+    keep_main_only: true
+    keep_and_shift: false
+    adaptive_distribute: true
+    warn_on_overflow: true
+    character_level_interpolation: false
+    main_speaker_label: 'SPEAKER_MAIN'
+
+  # Simplified filtering for evaluation
+  segment_filtering:
+    case_control:
+      enabled: true
+      allow_case1: true
+      allow_case2: true
+      allow_case3: false
+      allow_case4: false
+      allow_case5: false
+      min_audio_energy: 0.001
+      min_audio_presence_ratio: 0.05
+
+    quality:
+      enabled: true
+      min_moshi_words: 3       # Lower threshold for evaluation
+      min_moshi_duration_sec: 3.0
+      min_moshi_ratio: 0.1
+      min_user_words: 0
+      min_segment_duration_sec: 6.0
+      max_segment_duration_sec: null
+
+    preferences:
+      enabled: false  # Disable for deterministic evaluation
+
+    role_swapping:
+      enabled: false  # Disable for deterministic evaluation
+
+    logging:
+      enabled: true
+      verbosity: 1
+      log_first_filter: true
+      log_first_pass: true
+      log_case_detection: false
+      log_quality_checks: false
+      log_role_swapping: false
+      log_epoch_summary: true
+      save_to_file: true
+      log_filename: 'segment_filtering_eval.log'
+
+# -----------------------------------------------------------------------------
+# Evaluation Mode Settings
+# -----------------------------------------------------------------------------
+full_finetuning: false  # No training, just evaluation
+distributed_backend: fsdp
+
+# Loss Configuration (for evaluation loss computation)
+first_codebook_weight_multiplier: 100.0
+text_padding_weight: 0.5
+user_semantic_weight: null
+user_acoustic_weight: null
+user_stream_loss_ratio: 0.0
+
+# Sequence and Batch Configuration (Evaluation)
+duration_sec: 10
+batch_size: 4
+num_microbatches: 1   # No gradient accumulation needed for eval
+max_steps: 0          # No training steps
+max_norm: 1.0
+gradient_checkpointing: false
+
+# Optimizer (minimal, required for loading)
+optim:
+  lr: 1.0e-6
+  weight_decay: 0.1
+  pct_start: 0.05
+
+param_dtype: bfloat16
+
+# -----------------------------------------------------------------------------
+# Checkpointing (Load trained model)
+# -----------------------------------------------------------------------------
+checkpoint:
+  enabled: false
+  resume_if_exist: false
+  resume_from: null    # Set to specific checkpoint for evaluation
+
+# Pretrained Model Loading (for evaluation)
+pretrained:
+  enabled: true
+  path: "best"
+  checkpoint_dir: "./runs/korean_moshi_stage2_speaker/checkpoints"
+  strict: true
+  expected_new_modules: []  # No new modules for evaluation
+  verbose: true
+
+# Legacy options
+seed: 42
+log_freq: 10
+eval_freq: 1          # Evaluate every step (effectively just evaluation)
+do_eval: true
+eval_samples: 200     # Increased for thorough evaluation
+do_ckpt: false
+ckpt_freq: 1000
+save_adapters: false
+num_ckpt_keep: 1
+
+run_dir: './runs/korean_eval_speaker_cond'
+overwrite_run_dir: false
+
+# =============================================================================
+# SPEAKER CONDITIONING - EVALUATION MODE
+# =============================================================================
+# CRITICAL: Evaluation uses DETERMINISTIC sampling for reproducibility.
+#
+# Key Differences from Training:
+# 1. audio_prompt.deterministic: true
+#    - No torch.randint() calls
+#    - Always samples from position 0 (start strategy)
+#
+# 2. audio_prompt.sample_strategy: "start"
+#    - Consistent reference position across runs
+#    - Same input → Same reference → Same embedding
+#
+# 3. audio_prompt.fixed_duration_sec: 10.0
+#    - Fixed reference length (not random)
+#    - Ensures consistent speaker embedding quality
+#
+# Reproducibility Protocol:
+#   1. Reference is sampled DETERMINISTICALLY from start of audio
+#   2. Fixed duration (10 seconds) is used
+#   3. Full metadata saved in EvalSpeakerConditioningInfo
+#   4. reference.wav and speaker_metadata.json saved with samples
+# =============================================================================
+speaker:
+  enabled: true
+  method: "both"
+
+  # Speaker Encoder (W2v-BERT 2.0 SV)
+  encoder:
+    encoder_type: "w2v_bert2"
+    pretrained_path: "/path/to/model"
+    freeze: true
+    output_dim: 256
+    sample_rate: 16000
+    normalize_embedding: true
+    w2v_bert2_n_mfa_layers: -1
+    w2v_bert2_pooling: "ASP"
+
+  # Speaker Conditioner (Projection)
+  conditioner:
+    output_dim: 4096
+    initial_scale: 0.1
+    use_layernorm: true
+    dropout: 0.0
+    learnable_scale: true
+    scale_mode: "multiply"
+
+  # Reference Sampler
+  reference_sampler:
+    min_duration_sec: 3.0
+    max_duration_sec: 5.0
+    sample_rate: 24000
+    target_sample_rate: 16000
+
+  # =========================================================================
+  # AUDIO PROMPTING - EVALUATION MODE (DETERMINISTIC)
+  # =========================================================================
+  # These settings ensure reproducible evaluation:
+  # - deterministic: true → No random sampling
+  # - sample_strategy: "start" → Always from beginning
+  # - fixed_duration_sec: 10.0 → Consistent length
+  # =========================================================================
+  audio_prompt:
+    enable: true
+    mode: "audio_text"
+    min_duration_sec: 10.0
+    max_duration_sec: 10.0       # Same as min for fixed duration
+    sample_strategy: "start"     # EVALUATION: Always from start
+    avoid_overlap: false         # No exclusion needed for eval
+
+    # =====================================================================
+    # DETERMINISTIC MODE (CRITICAL FOR EVALUATION)
+    # =====================================================================
+    # When enabled:
+    #   1. No torch.randint() calls → No randomness
+    #   2. fixed_duration_sec overrides min/max_duration_sec
+    #   3. sample_strategy determines position (start=0, end=T-dur)
+    #   4. Same input always produces same reference selection
+    # =====================================================================
+    deterministic: true
+    fixed_duration_sec: 10.0     # Exact 10 seconds reference
+    use_word_count: false        # Use duration, not word count
+    fixed_word_count: 20         # Unused when use_word_count=false
+
+# -----------------------------------------------------------------------------
+# TensorBoard Logging (Evaluation)
+# -----------------------------------------------------------------------------
+tensorboard:
+  enabled: true
+  log_histograms: false          # Not needed for eval
+  histogram_freq: 1
+  log_gradients: false           # No gradients in eval
+  gradient_freq: 1
+  log_memory: true
+  log_per_codebook: true
+  flush_secs: 30
+
+# -----------------------------------------------------------------------------
+# Weights & Biases (Optional)
+# -----------------------------------------------------------------------------
+wandb:
+  project: 'k-moshi'
+  run_name: 'k-moshi-eval-speaker-cond'
+  offline: true
+  enabled: false
+
+# -----------------------------------------------------------------------------
+# Monitoring Configuration (Evaluation Focus)
+# -----------------------------------------------------------------------------
+monitoring:
+  text_evaluation:
+    enabled: true
+    eval_freq: 1
+    log_predictions: true
+    max_prediction_samples: 10   # More samples for eval
+    normalize_text: true
+
+  codebook_analysis:
+    enabled: true
+    log_freq: 1
+    log_usage_stats: true
+    log_entropy: true
+
+  gradient_monitoring:
+    enabled: false               # No gradients in eval
+
+  backbone_monitoring:
+    enabled: false
+
+# -----------------------------------------------------------------------------
+# Enhanced Evaluation (Comprehensive Analysis)
+# -----------------------------------------------------------------------------
+enhanced_evaluation:
+  semantic:
+    enabled: true
+    compute_bleu: true
+    compute_semantic: true       # Enable semantic similarity
+    max_samples: 50              # More samples for eval
+
+  alignment:
+    enabled: true
+    tolerance_frames: 2
+
+  dialogue:
+    enabled: true
+    overlap_threshold_frames: 3
+    silence_threshold_frames: 25
+
+  audio_quality:
+    enabled: true                # Enable audio quality metrics
+    compute_pesq: true
+    compute_stoi: true
+    compute_mcd: true
+    max_samples: 10
+
+# -----------------------------------------------------------------------------
+# Sample Saving (Critical for Evaluation)
+# -----------------------------------------------------------------------------
+# Saves:
+#   - sample_XX_gt_moshi.wav: Ground truth Moshi audio
+#   - sample_XX_pred_moshi.wav: Model prediction
+#   - sample_XX_gt_dialogue.wav: Full stereo dialogue (L=Moshi, R=User)
+#   - sample_XX_text.json: Text comparison
+#   - sample_XX_reference.wav: Reference audio for speaker conditioning
+#   - sample_XX_speaker_metadata.json: Speaker conditioning details
+# -----------------------------------------------------------------------------
+sample_saving:
+  enabled: true
+  save_segment_samples: true
+  save_dialogue_samples: true     # Save full dialogues for eval
+  save_freq: 1                    # Save every evaluation
+  max_samples_per_split: 100      # Keep more samples for analysis
+  samples_per_save: 10            # More samples per save
+  max_dialogues_per_split: 20
+  save_audio: true
+  save_text: true
+  audio_format: 'wav'
+  sample_rate: 24000
+  debug_audio_consistency: true   # Enable verification in eval
+
+# -----------------------------------------------------------------------------
+# Research Logging (For Analysis)
+# -----------------------------------------------------------------------------
+research_logging:
+  enabled: true
+  save_attention_maps: true
+  attention_freq: 1
+  attention_samples: 5
+  save_raw_attention: true        # Save raw attention for analysis
+  save_loss_curves: true
+  save_codebook_stats: true
+  save_gradient_norms: false
+  generate_plots: true
+  plot_freq: 1
+  save_summary: true

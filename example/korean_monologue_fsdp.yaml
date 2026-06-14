@@ -1,0 +1,194 @@
+# =============================================================================
+# K-Moshi Korean MONOLOGUE Pre-training Configuration (FSDP)
+# =============================================================================
+# This configuration is optimized for MONOLOGUE data (moshi_audio + moshi_text only)
+# where user audio is NOT present. Use this for pre-training stage before dialogue.
+#
+# Key differences from dialogue training:
+#   1. stream_integrity.allow_moshi_monologue: true
+#   2. smart_segmentation: disabled (or min_user_words: 0)
+#   3. role_swapping: disabled (no user audio to swap)
+#
+# Data format: MONO audio (single channel = Moshi only)
+#   - LEFT channel: Moshi audio
+#   - RIGHT channel: silence or duplicated Moshi audio
+#
+# ┌──────┬────────────────────────────────────────┬──────────┬─────────────────────┐
+# │ Case │ Configuration                          │ Status   │ Description         │
+# ├──────┼────────────────────────────────────────┼──────────┼─────────────────────┤
+# │ 1    │ moshi_audio + moshi_text + user_audio  │ ✅ VALID │ Full dialogue       │
+# │ 2    │ moshi_audio + moshi_text               │ ✅ VALID │ Moshi monologue ◀   │
+# │ 3    │ user_audio only                        │ ❌ SKIP  │ No Moshi content    │
+# │ 4    │ moshi_text + user_audio                │ ❌ SKIP  │ Missing Moshi audio │
+# │ 5    │ moshi_audio + user_audio               │ ❌ SKIP  │ Missing Moshi text  │
+# └──────┴────────────────────────────────────────┴──────────┴─────────────────────┘
+#
+# Usage:
+#   torchrun --nproc-per-node 4 -m train example/korean_monologue_fsdp.yaml
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Data Configuration
+# -----------------------------------------------------------------------------
+data:
+  train_data: './data/korean_monologue_train.jsonl'
+  eval_data: ''
+  shuffle: true
+
+# -----------------------------------------------------------------------------
+# Model Paths
+# -----------------------------------------------------------------------------
+moshi_paths:
+  hf_repo_id: null
+  moshi_path: '/path/to/model'
+  mimi_path: '/path/to/model'
+  tokenizer_path: '/path/to/model'
+  config_path: '/path/to/model'
+
+# -----------------------------------------------------------------------------
+# Korean Finetuning Configuration (MONOLOGUE MODE)
+# -----------------------------------------------------------------------------
+korean:
+  # Enable user stream training (stereo -> 17 codebooks)
+  # Even for monologue, we use stereo format for consistency
+  enable_user_stream: true
+  initialized_model_path: './models/k-moshi-init'
+
+  korean_tokenizer_path: null
+  korean_tokenizer_type: 'sentencepiece'
+  retain_token_ids: [0, 3, 32000]
+
+  # Text-Audio Interleaver Configuration
+  interleaver:
+    keep_main_only: true
+    keep_and_shift: false
+    adaptive_distribute: true
+    warn_on_overflow: true
+    character_level_interpolation: true
+    main_speaker_label: 'SPEAKER_MAIN'
+
+  # ---------------------------------------------------------------------------
+  # Data Filtering Configuration (MONOLOGUE OPTIMIZED)
+  # ---------------------------------------------------------------------------
+  data_filtering:
+    stream_integrity:
+      enabled: true
+
+      # ✅ MONOLOGUE SETTINGS: Only allow Case 1 and Case 2
+      # Case 1: Full dialogue (if some segments have user audio, allow them)
+      allow_case1: true
+      # Case 2: ✅ CRITICAL for monologue! Moshi-only segments
+      allow_case2: true
+      # Case 3-5: Filter out invalid/corrupted data
+      allow_case3: false
+      allow_case4: false
+      allow_case5: false
+
+      # Audio signal detection thresholds
+      min_audio_energy: 0.001
+      min_audio_presence_ratio: 0.05
+      min_moshi_text_words: 1
+
+      # Role swapping is disabled for monologue, but set for safety
+      check_after_swap: false
+
+      log_integrity_checks: false
+      log_first_filter: true
+
+  # ---------------------------------------------------------------------------
+  # Data Augmentation Configuration (MONOLOGUE OPTIMIZED)
+  # ---------------------------------------------------------------------------
+  data_augmentation:
+    # Option A: Segment Quality Filtering
+    filtering:
+      enabled: true
+      min_moshi_words: 3
+      min_moshi_duration_sec: 3.0
+      min_moshi_ratio: 0.1
+      min_segment_duration_sec: 10.0
+      max_segment_duration_sec: null
+      log_statistics: true
+
+    # Option B: Role Swapping - DISABLED for monologue
+    # No user audio to swap!
+    role_swapping:
+      enabled: false
+      probability: 0.0
+      swap_audio: false
+      swap_text: false
+      yield_both: false
+
+    # Option C: Smart Segmentation - DISABLED for monologue
+    # Or if enabled, configure for monologue compatibility
+    smart_segmentation:
+      enabled: false
+      min_duration_sec: 30.0
+      max_duration_sec: 120.0
+      prefer_moshi_start: false
+      prefer_moshi_start_prob: 0.0
+      # ✅ CRITICAL: Don't require both speakers for monologue
+      require_both_speakers: false
+      require_both_speakers_prob: 0.0
+      min_moshi_words: 3
+      # ✅ CRITICAL: Allow 0 user words for monologue
+      min_user_words: 2
+
+# -----------------------------------------------------------------------------
+# Training Mode Configuration
+# -----------------------------------------------------------------------------
+full_finetuning: true
+lora:
+  enable: false
+  rank: 64
+  scaling: 2.0
+  ft_embed: false
+
+distributed_backend: fsdp
+
+# -----------------------------------------------------------------------------
+# Loss Configuration
+# -----------------------------------------------------------------------------
+first_codebook_weight_multiplier: 100.0
+text_padding_weight: 0.5
+
+# User stream weights (minimal for monologue since user channel is silence)
+user_semantic_weight: null
+user_acoustic_weight: null
+user_stream_loss_ratio: 0.1  # Lower weight for user stream in monologue mode
+
+# -----------------------------------------------------------------------------
+# Training Hyperparameters
+# -----------------------------------------------------------------------------
+duration_sec: 60
+batch_size: 40
+num_microbatches: 8
+max_steps: 50000
+max_norm: 1.0
+gradient_checkpointing: true
+
+optim:
+  lr: 1.0e-5
+  weight_decay: 0.1
+  pct_start: 0.05
+
+param_dtype: bfloat16
+
+# -----------------------------------------------------------------------------
+# Checkpointing & Logging
+# -----------------------------------------------------------------------------
+seed: 42
+log_freq: 10
+eval_freq: 10
+do_eval: false
+do_ckpt: true
+ckpt_freq: 10
+save_adapters: false
+num_ckpt_keep: 3
+
+run_dir: './runs/korean_monologue_v1'
+overwrite_run_dir: false
+
+wandb:
+  project: 'k-moshi'
+  run_name: 'korean-monologue-pretrain-v1'
+  offline: true

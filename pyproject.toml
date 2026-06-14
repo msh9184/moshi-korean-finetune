@@ -1,0 +1,130 @@
+[project]
+name = "finetune"
+requires-python = ">= 3.10"
+description = "K-Moshi: Korean Moshi Finetuning"
+dynamic = ["version"]
+readme = "README.md"
+# NOTE: Dependencies are managed by setup_environment.sh for better compatibility
+# with pre-configured GPU server environments. The list below is for reference only.
+dependencies = [
+  # Core utilities
+  "fire",
+  "simple-parsing",
+  "pyyaml",
+  "tqdm",
+
+  # PyTorch - flexible version for server compatibility
+  # Supports: torch 2.4.x, 2.5.x, 2.6.x (including dev builds)
+  "torch>=2.4,<2.8",
+  "torchaudio>=2.4,<2.8",
+
+  # Triton - flexible for server compatibility
+  "triton>=3.0",
+
+  # NumPy - must be < 2.0 for compatibility
+  "numpy>=1.24,<2.0",
+
+  # Logging
+  "tensorboard>=2.14",
+
+  # Moshi dependencies (installed via --no-deps to avoid conflicts)
+  # These are managed separately by setup_environment.sh:
+  # - moshi, sphn, einops, bitsandbytes, sentencepiece, etc.
+
+  # Data processing
+  "safetensors>=0.4,<0.7",
+  "huggingface_hub>=0.24",
+  "auditok>=0.2,<0.4",
+  "whisper_timestamped",
+
+  # Distributed training
+  "submitit",
+
+  # JIT compilation
+  "llvmlite>=0.44",
+  "numba>=0.61",
+]
+
+[project.optional-dependencies]
+# We're putting dev dependencies here rather than [dependency-groups.dev] because
+# this way non-uv users can still install them with `pip install -e .[dev]`
+dev = [
+  "flake8",
+  "mypy==1.4.0",
+  "mypy-extensions==1.0.0",
+  "pre-commit",
+  "ruff==0.11",
+  "pyright",
+  "pytest",
+]
+
+# Optional logging backends
+logging = [
+  "wandb>=0.15",  # Weights & Biases (optional, network required)
+]
+
+# All optional dependencies
+all = [
+  "wandb>=0.15",
+  "soundfile",
+]
+
+[tool.uv]
+# The following fixes Pylance/VSCode not seeing the `finetune` package. See
+# https://github.com/astral-sh/uv/issues/3898
+config-settings = { editable_mode = "compat" }
+
+[tool.setuptools]
+packages = ["finetune"]
+
+[tool.black]
+include = '\.pyi?$'
+exclude = '''
+/(
+    \.git
+  | \.hg
+  | \.mypy_cache
+  | \.tox
+  | \.venv
+  | _build
+  | buck-out
+  | build
+  | dist
+)/
+'''
+line-length = 88
+
+[tool.isort]
+known_third_party = []
+line_length = 88
+
+[tool.mypy]
+python_version = "3.9"
+ignore_missing_imports = true
+follow_imports = "normal"
+
+[tool.ruff]
+lint.select = ["E", "F", "W", "C90", "I", "C4", "PT", "RSE", "TID", "TCH", "FLY", "NPY", "RUF", "T10"]
+line-length = 88
+lint.ignore = ["E501"]
+target-version = "py38"
+exclude = [".git","__pycache__",".vscode",".mypy_cache"]
+
+[tool.ruff.lint.mccabe]
+max-complexity = 20
+
+[tool.pytest.ini_options]
+python_classes = [
+  "!TestConfig",
+]
+filterwarnings = [
+    "error",
+    "ignore::DeprecationWarning",
+    "ignore::ImportWarning",
+    "ignore::DeprecationWarning:pkg_resources",
+    "ignore::DeprecationWarning:wandb",
+    "ignore::DeprecationWarning:torch.utils.tensorboard",
+    "ignore::UserWarning",
+]
+testpaths = []
+addopts = "--ignore=third_party --ignore=tokens"

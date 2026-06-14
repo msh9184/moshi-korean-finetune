@@ -1,0 +1,215 @@
+# =============================================================================
+# K-Moshi Version 1: KLUE Vocabulary + Moshi LLM Full Finetuning
+# =============================================================================
+#
+# Version 1 Goals:
+#   - Korean speech understanding with Moshi LLM 7B
+#   - KLUE BERT WordPiece 32K vocabulary
+#   - AIHub broadcast dataset (~15,000 hours)
+#
+# Environment:
+#   - 1 Node x 8 GPU (NVIDIA A100 80GB)
+#   - mpirun + FSDP distributed training
+#
+# Prerequisites:
+#   1. Data preparation Phase 1 & 2 completed:
+#      - Stereo audio with SPEAKER_MAIN/SPEAKER_USER
+#      - Word-level alignments via NFA
+#      - Symlinks: audio/*.json -> ../alignments/*.json
+#
+#   2. Create unified training manifest:
+#      python scripts/create_unified_manifest.py \
+#          --datasets key463-train key71314-train \
+#          --output ./data/korean_v1_train.jsonl
+#
+#   3. Download models:
+#      python scripts/download_models.py --output-dir /path/to/model
+#
+# Usage:
+#   mpirun -np 8 python -m train example/korean_v1_fsdp.yaml
+#
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Data Configuration
+# -----------------------------------------------------------------------------
+data:
+  # Unified training manifest (created by scripts/create_unified_manifest.py)
+  # For maximum data utilization, use combined (train+valid) manifest:
+  #   python scripts/create_unified_manifest.py --output ./data/korean_v1_combined.jsonl --split combined
+  # Format: {"path": "/abs/path/to/audio.flac", "duration": 45.32}
+  train_data: './data/korean_v1_combined.jsonl'
+
+  # Validation data - DISABLED for maximum training data utilization
+  # Moshi's validation only measures loss on 40 samples, not actual speech quality
+  # Better to use all data for training and evaluate manually after training
+  eval_data: ''
+
+  # Shuffle training data each epoch
+  shuffle: true
+
+# -----------------------------------------------------------------------------
+# Model Paths (Local)
+# -----------------------------------------------------------------------------
+# Use local model files for GPU cluster (no network dependency)
+moshi_paths:
+  hf_repo_id: null  # Set to null to use local paths
+  moshi_path: '/path/to/model'
+  mimi_path: '/path/to/model'
+  tokenizer_path: '/path/to/model'
+  config_path: '/path/to/model'
+
+# -----------------------------------------------------------------------------
+# Korean Finetuning Configuration (Version 1)
+# -----------------------------------------------------------------------------
+korean:
+  # Mono training mode (9 codebooks: text + 8 audio)
+  # User stream (17 codebooks) will be enabled in Version 3
+  enable_user_stream: false
+
+  # Not using pre-initialized model for Version 1
+  initialized_model_path: null
+
+  # Version 1: Use default Moshiko SentencePiece tokenizer (32K vocab)
+  # For KLUE BERT, set:
+  #   korean_tokenizer_path: '/path/to/model'
+  #   korean_tokenizer_type: 'klue'
+  korean_tokenizer_path: null
+  korean_tokenizer_type: 'sentencepiece'
+
+  # Token IDs to retain (not used in Version 1)
+  retain_token_ids: [0, 3, 32000]
+
+# -----------------------------------------------------------------------------
+# Training Mode
+# -----------------------------------------------------------------------------
+# Full finetuning - train all parameters
+full_finetuning: true
+
+# LoRA must be disabled for full finetuning
+lora:
+  enable: false
+  rank: 64
+  scaling: 2.0
+  ft_embed: false
+
+# Distributed training backend
+# - fsdp: FullyShardedDataParallel (recommended for full finetuning)
+# - ddp: DistributedDataParallel (simpler but needs more memory)
+distributed_backend: fsdp
+
+# -----------------------------------------------------------------------------
+# Loss Configuration
+# -----------------------------------------------------------------------------
+# Weight multiplier for first codebook (semantic tokens)
+# Higher weight emphasizes meaning over acoustic details
+first_codebook_weight_multiplier: 100.0
+
+# Weight for text padding tokens (reduce to focus on actual text)
+text_padding_weight: 0.5
+
+# -----------------------------------------------------------------------------
+# Sequence and Batch Configuration
+# -----------------------------------------------------------------------------
+# Sequence duration in seconds
+# - Affects memory: longer = more VRAM
+# - Affects context: longer = better long-range dependencies
+# - A100 80GB with FSDP can handle 60-90 seconds
+duration_sec: 60
+
+# Batch size per GPU
+# - A100 80GB with FSDP and duration_sec=60: 2-4 per GPU
+batch_size: 2
+
+# Gradient accumulation steps
+# Effective batch size = batch_size × num_microbatches × num_gpus
+# Example: 2 × 4 × 8 = 64 effective batch size
+num_microbatches: 4
+
+# Total training steps
+# ~15,000 hours of data, 60-second chunks, batch_size=64
+# → ~900,000 chunks → ~14,000 steps per epoch
+# For thorough training, use 50,000-100,000 steps
+max_steps: 50000
+
+# Gradient clipping (prevents exploding gradients)
+max_norm: 1.0
+
+# Gradient checkpointing (saves memory at cost of compute)
+# REQUIRED for full finetuning on A100 80GB
+gradient_checkpointing: true
+
+# -----------------------------------------------------------------------------
+# Optimizer Configuration
+# -----------------------------------------------------------------------------
+optim:
+  # Learning rate for full finetuning
+  # Lower is safer: 1e-5 to 5e-6 recommended
+  lr: 1.0e-5
+
+  # Weight decay for AdamW
+  weight_decay: 0.1
+
+  # Warmup ratio (5% of total steps)
+  pct_start: 0.05
+
+# Mixed precision (bfloat16 for A100)
+param_dtype: bfloat16
+
+# -----------------------------------------------------------------------------
+# Checkpointing & Logging
+# -----------------------------------------------------------------------------
+seed: 42
+
+# Logging frequency (steps)
+log_freq: 10
+
+# Evaluation - DISABLED (validation has limited value, use all data for training)
+# Moshi validation only measures loss on 40 samples, not speech quality
+eval_freq: 0
+do_eval: false
+
+# Checkpoint configuration
+do_ckpt: true
+ckpt_freq: 1000
+save_adapters: false  # Must be false for full finetuning
+num_ckpt_keep: 5
+
+# Output directory for checkpoints and logs
+run_dir: './runs/korean_v1'
+overwrite_run_dir: false
+
+# -----------------------------------------------------------------------------
+# TensorBoard Logging (Primary - Always Enabled)
+# -----------------------------------------------------------------------------
+tensorboard:
+  enabled: true
+  log_histograms: true        # Weight distribution histograms
+  histogram_freq: 500         # Steps between histogram logs (reduce for more detail)
+  log_gradients: true         # Gradient statistics
+  gradient_freq: 100          # Steps between gradient logs
+  log_memory: true            # GPU memory usage
+  log_per_codebook: true      # Per-codebook loss breakdown (8 audio codebooks)
+  flush_secs: 30              # Seconds between flushes
+
+# -----------------------------------------------------------------------------
+# Weights & Biases (Optional - Disabled by default)
+# -----------------------------------------------------------------------------
+# W&B is disabled for K-Moshi to avoid network dependencies.
+# TensorBoard provides equivalent functionality locally.
+# To enable: set project to non-null value and ensure wandb is installed.
+wandb:
+  project: null               # Set to 'k-moshi' to enable W&B
+  run_name: 'v1-klue-moshi-fsdp'
+  offline: true               # Always offline in network-restricted environments
+  # key: ''                   # Your W&B API key (or set WANDB_API_KEY env var)
+
+# -----------------------------------------------------------------------------
+# TensorBoard Usage
+# -----------------------------------------------------------------------------
+# View training progress:
+#   tensorboard --logdir=./runs/korean_v1/tensorboard
+#
+# Or from remote server with port forwarding:
+#   ssh -L 6006:localhost:6006 user@gpu-server
+#   tensorboard --logdir=./runs/korean_v1/tensorboard --bind_all

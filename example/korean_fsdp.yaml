@@ -1,0 +1,339 @@
+# =============================================================================
+# K-Moshi Korean Full Finetuning Configuration (FSDP)
+# =============================================================================
+# This configuration enables full finetuning with user stream support
+# using FSDP (FullyShardedDataParallel) for memory-efficient training.
+#
+# Prerequisites:
+#   1. Download models: python scripts/download_models.py --output-dir /path/to/model
+#   2. Initialize extended model:
+#      python -m tools.init_korean_moshi \
+#          --save_dir ./models/k-moshi-init \
+#          --extend_modules_for_user_stream \
+#          --init_text_embeddings
+#
+# Usage:
+#   Single node: torchrun --nproc-per-node 4 -m train example/korean_fsdp.yaml
+#   Multi-node:  mpirun -np 8 python -m train example/korean_fsdp.yaml
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Data Configuration
+# -----------------------------------------------------------------------------
+data:
+  train_data: './data/korean_train.jsonl'  # Path to training JSONL
+  eval_data: ''  # Optional: Path to evaluation JSONL
+  shuffle: true
+
+# -----------------------------------------------------------------------------
+# Model Paths
+# -----------------------------------------------------------------------------
+# Option 1: Use HuggingFace Hub (requires internet)
+# moshi_paths:
+#   hf_repo_id: 'kyutai/moshiko-pytorch-bf16'
+#   mimi_path: null
+#   tokenizer_path: null
+
+# Option 2: Use local model files (recommended for GPU cluster)
+# Run: python scripts/download_models.py --output-dir /path/to/model
+moshi_paths:
+  hf_repo_id: null  # Set to null to use local paths
+  moshi_path: '/path/to/model'
+  mimi_path: '/path/to/model'
+  tokenizer_path: '/path/to/model'
+  config_path: '/path/to/model'
+
+# -----------------------------------------------------------------------------
+# Korean Finetuning Configuration
+# -----------------------------------------------------------------------------
+korean:
+  # Enable user stream training (stereo -> 17 codebooks)
+  enable_user_stream: true
+
+  # Path to pre-initialized model with user stream extension
+  # Create this using: python -m tools.init_korean_moshi
+  initialized_model_path: './models/k-moshi-init'
+
+  # -----------------------------------------------------------------------------
+  # Tokenizer Configuration (Two Options)
+  # -----------------------------------------------------------------------------
+  # Option 1: Default Moshiko tokenizer (SentencePiece, 32K vocab)
+  #   - Set korean_tokenizer_path: null
+  #   - No additional setup needed
+  #
+  # Option 2: KLUE BERT tokenizer (WordPiece, 32K vocab, Korean-optimized)
+  #   - Download: python scripts/download_models.py --download-klue
+  #   - Set korean_tokenizer_path and korean_tokenizer_type
+  # -----------------------------------------------------------------------------
+
+  # Path to Korean tokenizer directory or .model file
+  # If null, uses the default Moshiko tokenizer
+  korean_tokenizer_path: null
+  # Example for KLUE BERT:
+  # korean_tokenizer_path: '/path/to/model'
+
+  # Tokenizer type: 'sentencepiece' (default) or 'klue' (uses wrapper)
+  korean_tokenizer_type: 'sentencepiece'
+  # For KLUE BERT: korean_tokenizer_type: 'klue'
+
+  # Token IDs to retain when reinitializing embeddings
+  # Default: [0, 3, 32000] for PAD, EOS, and special tokens
+  retain_token_ids: [0, 3, 32000]
+
+  # -----------------------------------------------------------------------------
+  # Text-Audio Interleaver Configuration
+  # -----------------------------------------------------------------------------
+  # Controls how text tokens are aligned with audio frames (12.5Hz = 80ms/frame).
+  # These settings are critical for Inner Monologue quality.
+  interleaver:
+    # Use only SPEAKER_MAIN (Moshi) text, excluding user speech
+    # When True, text stream only contains Moshi's Inner Monologue
+    keep_main_only: true
+
+    # Token queue behavior when words overlap in time
+    # When True: Queue-based approach, extends token queue (may delay tokens)
+    # When False: Replace queue with new word tokens (original Moshi/J-Moshi behavior)
+    # Recommendation: False for better timing accuracy
+    keep_and_shift: false
+
+    # Adaptive token distribution when overflow is detected
+    # When True: Distributes tokens evenly across available frames
+    # When False: Drops overflow tokens at segment end
+    # Recommendation: True for Korean (prevents token loss in fast speech)
+    adaptive_distribute: true
+
+    # Log warnings when token overflow occurs
+    warn_on_overflow: true
+
+    # Character-level timestamp interpolation (J-Moshi style)
+    # When True: Splits word timestamps to character-level for precise alignment
+    # This provides more accurate token placement for Korean/Japanese
+    # Recommendation: True for Korean/Japanese, False for English
+    character_level_interpolation: true
+
+    # Main speaker label in alignment data
+    main_speaker_label: 'SPEAKER_MAIN'
+
+  # ---------------------------------------------------------------------------
+  # Data Filtering Configuration (Pre-Augmentation)
+  # ---------------------------------------------------------------------------
+  # These filters run BEFORE data augmentation to ensure fundamental data quality.
+  # Invalid segments are always filtered out (not probabilistic).
+  #
+  # ┌──────┬────────────────────────────────────────┬──────────┬─────────────────────┐
+  # │ Case │ Configuration                          │ Status   │ Description         │
+  # ├──────┼────────────────────────────────────────┼──────────┼─────────────────────┤
+  # │ 1    │ moshi_audio + moshi_text + user_audio  │ ✅ VALID │ Full dialogue       │
+  # │ 2    │ moshi_audio + moshi_text               │ ✅ VALID │ Moshi monologue     │
+  # │ 3    │ user_audio only                        │ ❌ SKIP  │ No Moshi content    │
+  # │ 4    │ moshi_text + user_audio                │ ❌ SKIP  │ Missing Moshi audio │
+  # │ 5    │ moshi_audio + user_audio               │ ❌ SKIP  │ Missing Moshi text  │
+  # └──────┴────────────────────────────────────────┴──────────┴─────────────────────┘
+  #
+  # Validation Rule: VALID = has_moshi_audio AND has_moshi_text
+  # Note: user_audio is OPTIONAL (monologue is acceptable when enabled)
+  #
+  data_filtering:
+    # Stream Integrity Validation for Moshi's 17-codebook architecture
+    # Ensures the fundamental stream structure is valid for training
+    stream_integrity:
+      enabled: true
+
+      # -------------------------------------------------------------------------
+      # EXPLICIT CASE CONTROL (direct and intuitive!)
+      # -------------------------------------------------------------------------
+      # Set True to ALLOW, False to FILTER OUT each case.
+      # This is much more intuitive than adjusting energy thresholds!
+
+      # Case 1: moshi_audio + moshi_text + user_audio (Full dialogue)
+      allow_case1: true
+
+      # Case 2: moshi_audio + moshi_text only (Moshi monologue)
+      allow_case2: true
+
+      # Case 3: user_audio only (No Moshi content - usually bad data)
+      allow_case3: false
+
+      # Case 4: moshi_text + user_audio (Missing Moshi audio - data corruption)
+      allow_case4: false
+
+      # Case 5: moshi_audio + user_audio (Missing Moshi text - data corruption)
+      allow_case5: false
+
+      # -------------------------------------------------------------------------
+      # Audio Signal Detection (for case classification)
+      # -------------------------------------------------------------------------
+      # Minimum RMS energy threshold to consider audio channel as having content
+      # Typical speech RMS: 0.01-0.1, Silence: < 0.001
+      min_audio_energy: 0.001
+
+      # Minimum percentage of frames with audio above threshold
+      # 0.05 = at least 5% of frames should have audio
+      min_audio_presence_ratio: 0.05
+
+      # Minimum Moshi words required in alignments to consider text present
+      min_moshi_text_words: 1
+
+      # -------------------------------------------------------------------------
+      # Role Swapping Integration
+      # -------------------------------------------------------------------------
+      # When role_swapping is enabled, stream integrity is checked AGAIN after swap.
+      # This is CRITICAL because swapping can change the case:
+      # Example: Case 1 (both speakers) → Case 5 (new moshi has no text)
+      check_after_swap: true
+
+      # -------------------------------------------------------------------------
+      # Logging
+      # -------------------------------------------------------------------------
+      # Log detailed integrity check results for debugging
+      log_integrity_checks: false
+
+      # Log warning on first filtered sample
+      log_first_filter: true
+
+  # ---------------------------------------------------------------------------
+  # Data Augmentation Configuration
+  # ---------------------------------------------------------------------------
+  # Enables segment filtering and role swapping for improved training.
+  data_augmentation:
+    # Segment Quality Filtering
+    filtering:
+      enabled: true
+      min_moshi_words: 3
+      min_moshi_duration_sec: 3.0
+      min_moshi_ratio: 0.1
+      min_segment_duration_sec: 10.0
+      max_segment_duration_sec: null
+      log_statistics: true
+
+    # Role Swapping Data Augmentation (2x data)
+    role_swapping:
+      enabled: true
+      probability: 1.0
+      swap_audio: true
+      swap_text: true
+      yield_both: true
+
+    # Smart Segmentation with Probabilistic Filtering (disabled by default)
+    # Implements PROBABILISTIC CONTROL through DATA FILTERING
+    #
+    # ⚠️  MONOLOGUE TRAINING COMPATIBILITY:
+    # ────────────────────────────────────────────────────────────────────────
+    # For MONOLOGUE data (moshi_audio + moshi_text only, no user_audio):
+    #   1. Set require_both_speakers: false  (OR require_both_speakers_prob: 0)
+    #   2. Set min_user_words: 0  ← CRITICAL! Otherwise monologue is filtered!
+    #
+    # For DIALOGUE training (default):
+    #   - require_both_speakers: true with probability > 0
+    #   - min_user_words: >= 1
+    # ────────────────────────────────────────────────────────────────────────
+    smart_segmentation:
+      enabled: false
+      min_duration_sec: 30.0
+      max_duration_sec: 120.0
+
+      # Probabilistic: skip user-first segments with 70% probability
+      prefer_moshi_start: true
+      prefer_moshi_start_prob: 0.7
+
+      # Probabilistic: skip single-speaker segments with 90% probability
+      # ⚠️ Set to false for MONOLOGUE training!
+      require_both_speakers: true
+      require_both_speakers_prob: 0.9
+
+      # Hard minimums
+      min_moshi_words: 3
+      # ⚠️ Set to 0 for MONOLOGUE training!
+      min_user_words: 2
+
+# -----------------------------------------------------------------------------
+# Training Mode Configuration
+# -----------------------------------------------------------------------------
+# Full finetuning (train all parameters)
+full_finetuning: true
+
+# LoRA must be disabled for full finetuning
+lora:
+  enable: false
+  rank: 64
+  scaling: 2.0
+  ft_embed: false
+
+# Distributed training backend
+# - fsdp: FullyShardedDataParallel - shards model across GPUs, lower memory
+# - ddp: DistributedDataParallel - replicates full model, needs more memory
+distributed_backend: fsdp
+
+# -----------------------------------------------------------------------------
+# Loss Configuration
+# -----------------------------------------------------------------------------
+# Weight multiplier for first codebook (semantic tokens)
+first_codebook_weight_multiplier: 100.0
+
+# Weight for text padding tokens
+text_padding_weight: 0.5
+
+# User stream loss weights (for Full Duplex mode with dep_q=16)
+# These weights control the relative importance of user audio vs moshi audio
+user_semantic_weight: null  # Default: same as first_codebook_weight_multiplier
+user_acoustic_weight: null  # Default: 1.0
+user_stream_loss_ratio: 1.0  # Ratio of user loss to moshi loss (1.0 = equal weight)
+
+# -----------------------------------------------------------------------------
+# Training Hyperparameters
+# -----------------------------------------------------------------------------
+# Sequence duration in seconds (affects memory usage)
+duration_sec: 60
+
+# Batch size per GPU
+batch_size: 2
+
+# Gradient accumulation steps
+num_microbatches: 4
+
+# Total training steps
+max_steps: 10000
+
+# Gradient clipping
+max_norm: 1.0
+
+# Gradient checkpointing (saves memory)
+gradient_checkpointing: true
+
+# Optimizer settings
+optim:
+  lr: 1.0e-5  # Lower LR for full finetuning
+  weight_decay: 0.1
+  pct_start: 0.05  # Warmup ratio
+
+# Mixed precision
+param_dtype: bfloat16
+
+# -----------------------------------------------------------------------------
+# Checkpointing & Logging
+# -----------------------------------------------------------------------------
+seed: 42
+log_freq: 10
+eval_freq: 500
+do_eval: false
+
+# Checkpoint configuration
+do_ckpt: true
+ckpt_freq: 500
+save_adapters: false  # Must be false for full finetuning
+num_ckpt_keep: 3
+
+# Output directory for checkpoints and logs
+# IMPORTANT: Save checkpoints to working directory (repo), NOT to shared model storage
+# This keeps trained models separate from pretrained base models
+run_dir: './runs/korean_fsdp_v1'
+overwrite_run_dir: false
+
+# -----------------------------------------------------------------------------
+# Weights & Biases (Optional)
+# -----------------------------------------------------------------------------
+wandb:
+  project: 'k-moshi'
+  run_name: 'korean-fsdp-full-v1'
+  offline: true  # Set to false for online logging
+  # key: ''  # Your W&B API key

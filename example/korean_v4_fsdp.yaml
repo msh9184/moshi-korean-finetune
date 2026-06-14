@@ -1,0 +1,411 @@
+# =============================================================================
+# K-Moshi Version 4: MODULAR BACKBONE (HFLM 3B + Custom 32k Vocab)
+# =============================================================================
+#
+# Configuration for: HF-causal-LM backbone with custom Korean tokenizer
+#
+# Key Architecture:
+#   +-----------------------------------------------------------------+
+#   |                     LMModelWrapper                              |
+#   +-----------------------------------------------------------------+
+#   | Shared Components (from Moshi):                                 |
+#   |   - text_emb, audio_embs (Moshi dimension = 4096)              |
+#   |   - Depformer, text_linear, audio_linears                       |
+#   |   - Mimi audio encoder/decoder                                  |
+#   +-----------------------------------------------------------------+
+#   | DimensionAdapter: 4096 -> 3072 (input) / 3072 -> 4096 (output)  |
+#   +-----------------------------------------------------------------+
+#   | HFLMBackbone (from HuggingFace):                              |
+#   |   - 3B parameters, 30 layers, 24 heads, 4 KV heads (GQA)       |
+#   |   - d_model = 3072                                              |
+#   +-----------------------------------------------------------------+
+#
+# Environment:
+#   - 1 Node x 8 GPU (NVIDIA A100 80GB)
+#   - torchrun + FSDP distributed training
+#   - Expected GPU Memory: ~50-60GB per GPU
+#
+# Usage:
+#   torchrun --nproc-per-node 8 -m train example/korean_v4_fsdp.yaml
+#
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Data Configuration
+# -----------------------------------------------------------------------------
+data:
+  train_data: './data/korean_v4_train.jsonl'
+  eval_data: './data/korean_v4_valid.jsonl'
+  shuffle: true
+
+# =============================================================================
+# MODEL PATHS (REQUIRED for all backbone types)
+# =============================================================================
+# These paths are ALWAYS required because:
+#   1. moshi_path: Loads shared components (embeddings, depformer, linears)
+#   2. mimi_path: Loads Mimi audio encoder/decoder (always Moshi version)
+#   3. tokenizer_path: Loads SentencePiece text tokenizer (custom 32k vocab)
+#   4. config_path: Loads Moshi base configuration
+#
+# NOTE: Only the LM backbone (transformer layers) comes from HFLM.
+#       All other components are loaded from Moshi.
+#
+moshi_paths:
+  hf_repo_id: null  # Set to null when using local paths
+
+  # Moshi model weights (for shared components: embeddings, depformer, linears)
+  moshi_path: '/path/to/model'
+
+  # Mimi audio codec weights
+  mimi_path: '/path/to/model'
+
+  # Custom Korean tokenizer (multilingual 32k vocab SentencePiece)
+  # This is loaded via checkpoint_info.get_text_tokenizer()
+  tokenizer_path: '/path/to/model'
+
+  # Moshi configuration file
+  config_path: '/path/to/model'
+
+# =============================================================================
+# MODULAR BACKBONE CONFIGURATION
+# =============================================================================
+backbone:
+  # Backbone type: "moshi" | "hf_lm" | "custom"
+  type: "hf_lm"
+
+  # ---------------------------------------------------------------------------
+  # Moshi Backbone (NOT USED when type="hf_lm", kept for reference)
+  # ---------------------------------------------------------------------------
+  moshi:
+    hidden_dim: 4096
+    num_layers: 32
+    num_heads: 32
+    gradient_checkpointing: true
+
+  # ---------------------------------------------------------------------------
+  # HFLM Backbone (ACTIVE when type="hf_lm")
+  # ---------------------------------------------------------------------------
+  hf_lm:
+    # Path to HuggingFace model (local directory recommended for offline env)
+    model_path: '/path/to/model'
+
+    # Model architecture (must match the pretrained model)
+    hidden_dim: 3072          # HF causal LM hidden dimension
+    num_layers: 30            # Number of transformer layers
+    num_heads: 24             # Number of attention heads
+    num_key_value_heads: 4    # KV heads for GQA (Grouped Query Attention)
+
+    # Loading options
+    load_pretrained: true     # Load pretrained weights from model_path
+    torch_dtype: 'bfloat16'   # Model precision
+
+    # Performance options
+    gradient_checkpointing: true   # Memory saving (recommended for 80GB GPUs)
+
+    # Flash Attention 2: Recommended for A100 80GB
+    # Requires: pip install flash-attn --no-build-isolation
+    # Benefits: 2-4x memory reduction, 1.3-1.5x speedup
+    # Auto-detection: _check_flash_attn() verifies availability
+    use_flash_attention: true
+
+    # Sliding window attention (Mistral-style)
+    # null = disabled (full attention, recommended for training)
+    # Training sequence (40s = 500 steps) << window (4096) → effectively full attention
+    # For streaming inference, consider setting to 3000 (match Moshi context)
+    sliding_window: null
+
+  # ---------------------------------------------------------------------------
+  # Dimension Adapter (REQUIRED when backbone.hidden_dim != 4096)
+  # ---------------------------------------------------------------------------
+  # Bridges dimension mismatch between Moshi (4096) and HFLM (3072)
+  dimension_adapter:
+    enable: true              # Must be true for HFLM
+
+    # Dimensions
+    moshi_dim: 4096           # Fixed (Moshi embeddings/outputs)
+    backbone_dim: 3072        # HFLM hidden dimension
+
+    # Projection settings
+    bias: false               # No bias in projection layers
+    dropout: 0.0              # No dropout (stability)
+
+    # Weight initialization
+    init_method: "xavier"     # Xavier initialization
+    init_scale: 1.0
+
+# -----------------------------------------------------------------------------
+# Korean Finetuning Configuration
+# -----------------------------------------------------------------------------
+korean:
+  # Training mode: FULL-DUPLEX (stereo input, dep_q=8 output)
+  enable_user_stream: false
+  full_duplex_input: true
+
+  # Extended model path: NOT NEEDED for FULL-DUPLEX mode
+  initialized_model_path: null
+
+  # Korean tokenizer override: null (use moshi_paths.tokenizer_path)
+  # Only set this if using KLUE BERT or other non-SentencePiece tokenizer
+  korean_tokenizer_path: null
+  korean_tokenizer_type: 'sentencepiece'
+
+  # Token IDs to retain (PAD=0, EOS=3, special=32000)
+  retain_token_ids: [0, 3, 32000]
+
+  # Text-Audio Interleaver
+  interleaver:
+    keep_main_only: true
+    keep_and_shift: false
+    adaptive_distribute: true
+    warn_on_overflow: true
+    character_level_interpolation: true
+    main_speaker_label: 'SPEAKER_MAIN'
+
+  # Segment Filtering (5-Layer System)
+  segment_filtering:
+    case_control:
+      enabled: true
+      allow_case1: true   # Full dialogue
+      allow_case2: true   # Moshi monologue
+      allow_case3: false
+      allow_case4: false
+      allow_case5: false
+      min_audio_energy: 0.001
+      min_audio_presence_ratio: 0.05
+
+    quality:
+      enabled: true
+      min_moshi_words: 3
+      min_moshi_duration_sec: 3.0
+      min_moshi_ratio: 0.1
+      min_user_words: 0
+      min_segment_duration_sec: 10.0
+      max_segment_duration_sec: null
+
+    preferences:
+      enabled: true
+      prefer_moshi_start: false
+      prefer_moshi_start_prob: 0.7
+      prefer_both_speakers: true
+      prefer_both_speakers_prob: 0.5
+
+    role_swapping:
+      enabled: true
+      probability: 0.2
+      swap_audio: true
+      swap_text: true
+      yield_both: true
+      recheck_after_swap: true
+
+    logging:
+      enabled: true
+      verbosity: 1
+      log_first_filter: true
+      log_first_pass: true
+      log_case_detection: false
+      log_quality_checks: false
+      log_role_swapping: false
+      log_epoch_summary: true
+      save_to_file: true
+      log_filename: 'segment_filtering.log'
+
+# -----------------------------------------------------------------------------
+# Training Mode
+# -----------------------------------------------------------------------------
+full_finetuning: true
+
+lora:
+  enable: false
+  rank: 64
+  scaling: 2.0
+  ft_embed: false
+
+distributed_backend: fsdp
+
+# -----------------------------------------------------------------------------
+# Loss Configuration
+# -----------------------------------------------------------------------------
+first_codebook_weight_multiplier: 100.0
+text_padding_weight: 0.5
+user_semantic_weight: null
+user_acoustic_weight: null
+user_stream_loss_ratio: 0.0
+
+# -----------------------------------------------------------------------------
+# Sequence and Batch Configuration
+# -----------------------------------------------------------------------------
+duration_sec: 40
+batch_size: 128           # Larger batch due to smaller HFLM (3B vs 7B)
+num_microbatches: 8
+max_steps: 50000
+max_norm: 1.0
+gradient_checkpointing: true
+
+# -----------------------------------------------------------------------------
+# Optimizer Configuration
+# -----------------------------------------------------------------------------
+optim:
+  lr: 3.0e-5              # Backbone learning rate
+  depformer_lr: 3.0e-5    # DepFormer learning rate
+  adapter_lr: 1.0e-4      # Dimension adapter learning rate
+  weight_decay: 0.1
+  beta1: 0.9
+  beta2: 0.95
+  eps: 1.0e-5
+  pct_start: 0.05
+
+# -----------------------------------------------------------------------------
+# Scheduler Configuration
+# -----------------------------------------------------------------------------
+scheduler:
+  type: 'cosine_warmup'
+  warmup_steps: 100
+  min_lr: 1.0e-7
+  t_0: 1000
+  t_mult: 2
+
+param_dtype: bfloat16
+
+# -----------------------------------------------------------------------------
+# Checkpointing Configuration
+# -----------------------------------------------------------------------------
+checkpoint:
+  enabled: true
+  name_prefix: 'checkpoint'
+  metric_type: 'eval_loss'
+  metric_best: 'min'
+  resume_if_exist: true
+  resume_from: null
+  save_optimizer: true
+  save_scheduler: true
+  save_rng_state: true
+  save_freq: 1
+  max_keep: 15
+  save_adapters_only: false
+  save_dtype: 'bfloat16'
+
+# Legacy options
+seed: 42
+log_freq: 1
+eval_freq: 1
+do_eval: true
+eval_samples: 100
+do_ckpt: false
+ckpt_freq: 1
+save_adapters: false
+num_ckpt_keep: 15
+
+run_dir: './runs/korean_v4_hf_lm'
+overwrite_run_dir: false
+
+# -----------------------------------------------------------------------------
+# TensorBoard Logging
+# -----------------------------------------------------------------------------
+tensorboard:
+  enabled: true
+  log_histograms: true
+  histogram_freq: 1
+  log_gradients: true
+  gradient_freq: 1
+  log_memory: true
+  log_per_codebook: true
+  flush_secs: 30
+
+# -----------------------------------------------------------------------------
+# Weights & Biases (Optional)
+# -----------------------------------------------------------------------------
+wandb:
+  project: 'k-moshi'
+  run_name: 'korean-v4-hf_lm-backbone'
+  offline: true
+  enabled: false
+
+# -----------------------------------------------------------------------------
+# Monitoring Configuration
+# -----------------------------------------------------------------------------
+monitoring:
+  text_evaluation:
+    enabled: true
+    eval_freq: 1
+    log_predictions: true
+    max_prediction_samples: 3
+    normalize_text: true
+
+  codebook_analysis:
+    enabled: true
+    log_freq: 1
+    log_usage_stats: true
+    log_entropy: true
+
+  gradient_monitoring:
+    enabled: true
+    log_freq: 1
+    alert_on_nan: true
+    alert_on_inf: true
+    exploding_threshold: 100.0
+    vanishing_threshold: 1.0e-7
+    log_per_layer: false
+
+  backbone_monitoring:
+    enabled: true
+    log_adapter_norms: true
+    log_backbone_activations: false
+    compare_backbone_moshi: false
+
+# -----------------------------------------------------------------------------
+# Enhanced Evaluation
+# -----------------------------------------------------------------------------
+enhanced_evaluation:
+  semantic:
+    enabled: true
+    compute_bleu: true
+    compute_semantic: false
+    max_samples: 20
+
+  alignment:
+    enabled: true
+    tolerance_frames: 2
+
+  dialogue:
+    enabled: false
+    overlap_threshold_frames: 3
+    silence_threshold_frames: 25
+
+  audio_quality:
+    enabled: false
+    compute_pesq: true
+    compute_stoi: true
+    compute_mcd: true
+    max_samples: 3
+
+# -----------------------------------------------------------------------------
+# Sample Saving
+# -----------------------------------------------------------------------------
+sample_saving:
+  enabled: true
+  save_segment_samples: true
+  save_dialogue_samples: false
+  save_freq: 1
+  max_samples_per_split: 25
+  samples_per_save: 5
+  max_dialogues_per_split: 5
+  save_audio: true
+  save_text: true
+  audio_format: 'wav'
+  sample_rate: 24000
+
+# -----------------------------------------------------------------------------
+# Research Logging
+# -----------------------------------------------------------------------------
+research_logging:
+  enabled: true
+  save_attention_maps: true
+  attention_freq: 1
+  attention_samples: 2
+  save_raw_attention: false
+  save_loss_curves: true
+  save_codebook_stats: true
+  save_gradient_norms: true
+  generate_plots: true
+  plot_freq: 1
+  save_summary: true

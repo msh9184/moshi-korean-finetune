@@ -1,0 +1,58 @@
+# Korean Moshi Dataset Preparation Configuration
+# ==============================================
+#
+# This config file defines the pipeline settings for converting
+# Korean broadcast data to Moshi finetuning format.
+
+output_base: "/path/to/data"
+
+# Dataset sources
+datasets:
+  - name: "aihub-broadcast-key463-839g-train"
+    source_path: "/path/to/data"
+    output_path: "/path/to/data"
+    split: "train"
+
+  - name: "aihub-broadcast-key463-839g-valid"
+    source_path: "/path/to/data"
+    output_path: "/path/to/data"
+    split: "valid"
+
+  - name: "aihub-broadcast-key71314-559g-train"
+    source_path: "/path/to/data"
+    output_path: "/path/to/data"
+    split: "train"
+
+  - name: "aihub-broadcast-key71314-559g-valid"
+    source_path: "/path/to/data"
+    output_path: "/path/to/data"
+    split: "valid"
+
+# Speaker selection configuration
+# Hybrid score = duration_weight × duration_ratio + turn_count_weight × turn_ratio
+speaker_selection:
+  duration_weight: 0.6
+  turn_count_weight: 0.4
+  min_duration_sec: 10.0       # Skip conversations shorter than this
+  max_duration_sec: 7200.0     # Skip conversations longer than 2 hours
+  min_turns: 2                 # Require at least 2 turns
+
+# Audio processing configuration
+audio:
+  sample_rate: 24000           # Moshi expects 24kHz
+  channels: 2                  # Stereo output
+
+# Word-level alignment configuration
+alignment:
+  whisper_model: "large-v3"    # Best quality for Korean
+  language: "ko"
+  min_word_confidence: 0.7     # Filter low-confidence words
+
+# Phase 1 (CPU) configuration
+phase1:
+  num_workers: 16              # Workers per machine
+  total_machines: 20           # For distributed processing
+
+# Phase 2 (GPU) configuration
+phase2:
+  num_gpus: 8                  # Number of GPUs to use

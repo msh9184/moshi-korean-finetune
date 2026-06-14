@@ -1,0 +1,198 @@
+# =============================================================================
+# K-Moshi Korean Full Finetuning Configuration (DDP)
+# =============================================================================
+# This configuration enables full finetuning with user stream support
+# using DDP (DistributedDataParallel) for simpler distributed training setup.
+#
+# Note: DDP requires more memory per GPU than FSDP since each GPU holds a
+# complete copy of the model. Use FSDP for full finetuning on limited memory.
+#
+# Prerequisites:
+#   1. Download models: python scripts/download_models.py --output-dir /path/to/model
+#   2. Initialize extended model:
+#      python -m tools.init_korean_moshi \
+#          --save_dir ./models/k-moshi-init \
+#          --extend_modules_for_user_stream \
+#          --init_text_embeddings
+#
+# Usage:
+#   Single node: torchrun --nproc-per-node 4 -m train example/korean_ddp.yaml
+#   Multi-node:  mpirun -np 8 python -m train example/korean_ddp.yaml
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Data Configuration
+# -----------------------------------------------------------------------------
+data:
+  train_data: './data/korean_train.jsonl'  # Path to training JSONL
+  eval_data: ''  # Optional: Path to evaluation JSONL
+  shuffle: true
+
+# -----------------------------------------------------------------------------
+# Model Paths
+# -----------------------------------------------------------------------------
+# Option 1: Use HuggingFace Hub (requires internet)
+# moshi_paths:
+#   hf_repo_id: 'kyutai/moshiko-pytorch-bf16'
+#   mimi_path: null
+#   tokenizer_path: null
+
+# Option 2: Use local model files (recommended for GPU cluster)
+# Run: python scripts/download_models.py --output-dir /path/to/model
+moshi_paths:
+  hf_repo_id: null  # Set to null to use local paths
+  moshi_path: '/path/to/model'
+  mimi_path: '/path/to/model'
+  tokenizer_path: '/path/to/model'
+  config_path: '/path/to/model'
+
+# -----------------------------------------------------------------------------
+# Korean Finetuning Configuration
+# -----------------------------------------------------------------------------
+korean:
+  # Enable user stream training (stereo -> 17 codebooks)
+  enable_user_stream: true
+
+  # Path to pre-initialized model with user stream extension
+  # Create this using: python -m tools.init_korean_moshi
+  initialized_model_path: './models/k-moshi-init'
+
+  # -----------------------------------------------------------------------------
+  # Tokenizer Configuration (Two Options)
+  # -----------------------------------------------------------------------------
+  # Option 1: Default Moshiko tokenizer (SentencePiece, 32K vocab)
+  #   - Set korean_tokenizer_path: null
+  #   - No additional setup needed
+  #
+  # Option 2: KLUE BERT tokenizer (WordPiece, 32K vocab, Korean-optimized)
+  #   - Download: python scripts/download_models.py --download-klue
+  #   - Set korean_tokenizer_path and korean_tokenizer_type
+  # -----------------------------------------------------------------------------
+
+  # Path to Korean tokenizer directory or .model file
+  # If null, uses the default Moshiko tokenizer
+  korean_tokenizer_path: null
+  # Example for KLUE BERT:
+  # korean_tokenizer_path: '/path/to/model'
+
+  # Tokenizer type: 'sentencepiece' (default) or 'klue' (uses wrapper)
+  korean_tokenizer_type: 'sentencepiece'
+  # For KLUE BERT: korean_tokenizer_type: 'klue'
+
+  # Token IDs to retain when reinitializing embeddings
+  # Default: [0, 3, 32000] for PAD, EOS, and special tokens
+  retain_token_ids: [0, 3, 32000]
+
+  # -----------------------------------------------------------------------------
+  # Text-Audio Interleaver Configuration
+  # -----------------------------------------------------------------------------
+  # Controls how text tokens are aligned with audio frames (12.5Hz = 80ms/frame).
+  # These settings are critical for Inner Monologue quality.
+  interleaver:
+    # Use only SPEAKER_MAIN (Moshi) text, excluding user speech
+    keep_main_only: true
+
+    # Token queue behavior when words overlap in time
+    # False: Replace queue (original Moshi/J-Moshi behavior, recommended)
+    keep_and_shift: false
+
+    # Adaptive token distribution when overflow is detected
+    # True: Distributes tokens evenly (recommended for Korean)
+    adaptive_distribute: true
+
+    # Log warnings when token overflow occurs
+    warn_on_overflow: true
+
+    # Character-level timestamp interpolation (J-Moshi style)
+    # True: Precise alignment for Korean/Japanese
+    character_level_interpolation: true
+
+    # Main speaker label in alignment data
+    main_speaker_label: 'SPEAKER_MAIN'
+
+# -----------------------------------------------------------------------------
+# Training Mode Configuration
+# -----------------------------------------------------------------------------
+# Full finetuning (train all parameters)
+full_finetuning: true
+
+# LoRA must be disabled for full finetuning
+lora:
+  enable: false
+  rank: 64
+  scaling: 2.0
+  ft_embed: false
+
+# Distributed training backend
+# - fsdp: FullyShardedDataParallel - shards model across GPUs, lower memory
+# - ddp: DistributedDataParallel - replicates full model, needs more memory
+distributed_backend: ddp
+
+# -----------------------------------------------------------------------------
+# Loss Configuration
+# -----------------------------------------------------------------------------
+# Weight multiplier for first codebook (semantic tokens)
+first_codebook_weight_multiplier: 100.0
+
+# Weight for text padding tokens
+text_padding_weight: 0.5
+
+# -----------------------------------------------------------------------------
+# Training Hyperparameters
+# -----------------------------------------------------------------------------
+# Sequence duration in seconds (affects memory usage)
+# DDP requires smaller batches due to memory replication
+duration_sec: 30
+
+# Batch size per GPU (smaller for DDP)
+batch_size: 1
+
+# Gradient accumulation steps (increase to compensate for smaller batch)
+num_microbatches: 8
+
+# Total training steps
+max_steps: 10000
+
+# Gradient clipping
+max_norm: 1.0
+
+# Gradient checkpointing (saves memory)
+gradient_checkpointing: true
+
+# Optimizer settings
+optim:
+  lr: 1.0e-5  # Lower LR for full finetuning
+  weight_decay: 0.1
+  pct_start: 0.05  # Warmup ratio
+
+# Mixed precision
+param_dtype: bfloat16
+
+# -----------------------------------------------------------------------------
+# Checkpointing & Logging
+# -----------------------------------------------------------------------------
+seed: 42
+log_freq: 10
+eval_freq: 500
+do_eval: false
+
+# Checkpoint configuration
+do_ckpt: true
+ckpt_freq: 500
+save_adapters: false  # Must be false for full finetuning
+num_ckpt_keep: 3
+
+# Output directory for checkpoints and logs
+# IMPORTANT: Save checkpoints to working directory (repo), NOT to shared model storage
+# This keeps trained models separate from pretrained base models
+run_dir: './runs/korean_ddp_v1'
+overwrite_run_dir: false
+
+# -----------------------------------------------------------------------------
+# Weights & Biases (Optional)
+# -----------------------------------------------------------------------------
+wandb:
+  project: 'k-moshi'
+  run_name: 'korean-ddp-full-v1'
+  offline: true  # Set to false for online logging
+  # key: ''  # Your W&B API key
