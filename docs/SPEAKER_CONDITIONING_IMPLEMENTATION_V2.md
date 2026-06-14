@@ -47,62 +47,39 @@ speaker:
 
 ## 2. 아키텍처 개요
 
-```
-┌─────────────────────────────────────────────────────────────────────────────────────────┐
-│                          K-Moshi Speaker Conditioning V2.1                               │
-│                    W2v-BERT 2.0 SV (256-dim) + VALL-E Style Prompting                   │
-├─────────────────────────────────────────────────────────────────────────────────────────┤
-│                                                                                         │
-│   Reference Audio (10-15초)                                                             │
-│   ┌─────────────────────────────────────────────────────────────────────────────────┐   │
-│   │                    [Raw Audio Waveform @ 24kHz]                                  │   │
-│   └─────────────────────────────────────────────────────────────────────────────────┘   │
-│                           │                                  │                          │
-│                           ↓                                  ↓                          │
-│   ┌───────────────────────────────────────┐   ┌───────────────────────────────────────┐ │
-│   │      PATH 1: Speaker Encoder          │   │      PATH 2: Audio Prompt             │ │
-│   │         (Global Condition)            │   │         (Local Condition)             │ │
-│   ├───────────────────────────────────────┤   ├───────────────────────────────────────┤ │
-│   │                                       │   │                                       │ │
-│   │  ┌─────────────────────────────────┐  │   │  Reference Codes [9, T_ref]           │ │
-│   │  │ Resample 24kHz → 16kHz          │  │   │  ┌─────────────────────────────────┐  │ │
-│   │  └──────────────┬──────────────────┘  │   │  │ Text:  [안녕][하세요][PAD]...   │  │ │
-│   │                 ↓                     │   │  │ Audio: [C0-7][C0-7][C0-7]...    │  │ │
-│   │  ┌─────────────────────────────────┐  │   │  └─────────────────────────────────┘  │ │
-│   │  │ W2v-BERT 2.0 SV Encoder         │  │   │                  ↓                    │ │
-│   │  │  ├─ MFA (25 layers concat)      │  │   │  Prepend to Main Sequence            │ │
-│   │  │  ├─ ASP (Attentive Stats Pool)  │  │   │  ┌─────────────────────────────────┐  │ │
-│   │  │  └─ Bottleneck → 256-dim        │  │   │  │ [PROMPT | MAIN SEQUENCE]       │  │ │
-│   │  └──────────────┬──────────────────┘  │   │  │ prompt_mask: [True...|False...] │  │ │
-│   │                 ↓                     │   │  └─────────────────────────────────┘  │ │
-│   │  speaker_embedding: [B, 256]          │   │                                       │ │
-│   │                 ↓                     │   │  prompted_codes: [B, 9, T_ref+T_main] │ │
-│   │  ┌─────────────────────────────────┐  │   │                                       │ │
-│   │  │ Speaker Conditioner             │  │   └───────────────────────────────────────┘ │
-│   │  │  Linear(256→4096) + LN + Scale  │  │                      │                      │
-│   │  └──────────────┬──────────────────┘  │                      │                      │
-│   │                 ↓                     │                      │                      │
-│   │  sum_condition: [B, 4096]             │                      │                      │
-│   └───────────────────────────────────────┘                      │                      │
-│                           │                                      │                      │
-│                           └──────────────────┬───────────────────┘                      │
-│                                              ↓                                          │
-│   ┌─────────────────────────────────────────────────────────────────────────────────┐   │
-│   │                         Temporal Transformer (7B)                                │   │
-│   │                                                                                  │   │
-│   │   hidden = embed(prompted_codes) + sum_condition.unsqueeze(1)                   │   │
-│   │             └─ Local Condition via Attention ─┘    └─ Global Condition ─┘       │   │
-│   │                                                                                  │   │
-│   └─────────────────────────────────────────────────────────────────────────────────┘   │
-│                                              ↓                                          │
-│   ┌─────────────────────────────────────────────────────────────────────────────────┐   │
-│   │  Loss Computation (prompt_mask=True 영역 제외)                                   │   │
-│   │                                                                                  │   │
-│   │  text_loss = CE(text_logits[:, ~prompt_mask], targets[:, ~prompt_mask])         │   │
-│   │  audio_loss = CE(audio_logits[:, ~prompt_mask], targets[:, ~prompt_mask])       │   │
-│   └─────────────────────────────────────────────────────────────────────────────────┘   │
-│                                                                                         │
-└─────────────────────────────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    title["K-Moshi Speaker Conditioning V2.1<br/>W2v-BERT 2.0 SV (256-dim) + VALL-E Style Prompting"]
+    ref["Reference Audio (10-15초)<br/>Raw Audio Waveform @ 24kHz"]
+
+    subgraph P1["PATH 1: Speaker Encoder (Global Condition)"]
+        direction TB
+        resample["Resample 24kHz to 16kHz"]
+        enc["W2v-BERT 2.0 SV Encoder<br/>MFA (25 layers concat)<br/>ASP (Attentive Stats Pool)<br/>Bottleneck to 256-dim"]
+        spkemb["speaker_embedding: [B, 256]"]
+        cond["Speaker Conditioner<br/>Linear(256 to 4096) + LN + Scale"]
+        sumcond["sum_condition: [B, 4096]"]
+        resample --> enc --> spkemb --> cond --> sumcond
+    end
+
+    subgraph P2["PATH 2: Audio Prompt (Local Condition)"]
+        direction TB
+        refcodes["Reference Codes [9, T_ref]<br/>Text:  [안녕][하세요][PAD]...<br/>Audio: [C0-7][C0-7][C0-7]..."]
+        prepend["Prepend to Main Sequence<br/>[PROMPT | MAIN SEQUENCE]<br/>prompt_mask: [True...|False...]"]
+        promptedcodes["prompted_codes: [B, 9, T_ref+T_main]"]
+        refcodes --> prepend --> promptedcodes
+    end
+
+    title --> ref
+    ref --> resample
+    ref --> refcodes
+
+    transformer["Temporal Transformer (7B)<br/>hidden = embed(prompted_codes) + sum_condition.unsqueeze(1)<br/>Local Condition via Attention + Global Condition"]
+    sumcond --> transformer
+    promptedcodes --> transformer
+
+    loss["Loss Computation (prompt_mask=True 영역 제외)<br/>text_loss = CE(text_logits[:, not prompt_mask], targets[:, not prompt_mask])<br/>audio_loss = CE(audio_logits[:, not prompt_mask], targets[:, not prompt_mask])"]
+    transformer --> loss
 ```
 
 ---

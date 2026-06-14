@@ -34,34 +34,21 @@ K-Moshi는 한국어 Full Duplex 음성 대화 모델로, 원본 Moshi 아키텍
 
 ### 2.1 전체 아키텍처
 
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                           K-MOSHI ARCHITECTURE                               │
-├─────────────────────────────────────────────────────────────────────────────┤
-│                                                                              │
-│  ┌──────────────────┐                      ┌──────────────────────────────┐ │
-│  │   MIMI CODEC     │                      │       LMModel (7B)           │ │
-│  │   (FROZEN)       │                      │       (TRAINED)              │ │
-│  │                  │                      │                              │ │
-│  │  ┌────────────┐  │   Audio Tokens       │  ┌────────────────────────┐  │ │
-│  │  │  Encoder   │──┼──────────────────────┼─▶│  Temporal Transformer  │  │ │
-│  │  │  (SEANet)  │  │   [B, 8, T]          │  │  (7B Parameters)       │  │ │
-│  │  └────────────┘  │   per speaker        │  │  lr: tempformer_lr     │  │ │
-│  │        │         │                      │  └──────────┬─────────────┘  │ │
-│  │        │         │                      │             │                │ │
-│  │  ┌────────────┐  │                      │             ▼                │ │
-│  │  │  Decoder   │  │                      │  ┌────────────────────────┐  │ │
-│  │  │  (SEANet)  │  │                      │  │   Depth Transformer    │  │ │
-│  │  └────────────┘  │                      │  │   (DepFormer)          │  │ │
-│  │        │         │                      │  │   lr: depformer_lr     │  │ │
-│  │        ▼         │                      │  └──────────┬─────────────┘  │ │
-│  │   Output Audio   │                      │             │                │ │
-│  │                  │                      │             ▼                │ │
-│  └──────────────────┘                      │      Logits Output           │ │
-│                                            │      Text + Audio            │ │
-│                                            └──────────────────────────────┘ │
-│                                                                              │
-└─────────────────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart LR
+  subgraph MIMI["MIMI CODEC (FROZEN)"]
+    ENC["Encoder<br/>(SEANet)"]
+    DEC["Decoder<br/>(SEANet)"]
+    OUT["Output Audio"]
+    DEC --> OUT
+  end
+  subgraph LM["LMModel (7B) (TRAINED)"]
+    TT["Temporal Transformer<br/>(7B Parameters)<br/>lr: tempformer_lr"]
+    DT["Depth Transformer<br/>(DepFormer)<br/>lr: depformer_lr"]
+    LOG["Logits Output<br/>Text + Audio"]
+    TT --> DT --> LOG
+  end
+  ENC -->|"Audio Tokens [B, 8, T] per speaker"| TT
 ```
 
 ### 2.2 컴포넌트별 상세
@@ -195,94 +182,44 @@ korean:
 
 ### 4.1 학습 시 데이터 흐름
 
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                      TRAINING DATA FLOW                                      │
-├─────────────────────────────────────────────────────────────────────────────┤
-│                                                                              │
-│  ┌─────────────────────┐                                                     │
-│  │   Stereo WAV        │                                                     │
-│  │   (24kHz)           │                                                     │
-│  │   L: Moshi (AI)     │                                                     │
-│  │   R: User           │                                                     │
-│  └──────────┬──────────┘                                                     │
-│             │                                                                │
-│             ▼                                                                │
-│  ┌─────────────────────────────────────────────────────────────────────────┐ │
-│  │                   StereoInterleavedTokenizer                            │ │
-│  │  ┌───────────────────────────────────────────────────────────────────┐  │ │
-│  │  │                        MIMI CODEC                                 │  │ │
-│  │  │                                                                   │  │ │
-│  │  │  Left Channel ───▶ [mimi.encode] ───▶ moshi_codes [B, 8, T]      │  │ │
-│  │  │  Right Channel ──▶ [mimi.encode] ───▶ user_codes [B, 8, T]       │  │ │
-│  │  │                                                                   │  │ │
-│  │  └───────────────────────────────────────────────────────────────────┘  │ │
-│  │                           │                                              │ │
-│  │                           ▼                                              │ │
-│  │  ┌───────────────────────────────────────────────────────────────────┐  │ │
-│  │  │                      INTERLEAVER                                  │  │ │
-│  │  │                                                                   │  │ │
-│  │  │  JSON Alignments ───▶ text_tokens [B, 1, T]                      │  │ │
-│  │  │                                                                   │  │ │
-│  │  │  Combine:                                                         │  │ │
-│  │  │    text_tokens   [B, 1, T]                                       │  │ │
-│  │  │    moshi_codes   [B, 8, T]                                       │  │ │
-│  │  │    user_codes    [B, 8, T]                                       │  │ │
-│  │  │    ─────────────────────────                                     │  │ │
-│  │  │    final_codes   [B, 17, T]                                      │  │ │
-│  │  │                                                                   │  │ │
-│  │  └───────────────────────────────────────────────────────────────────┘  │ │
-│  └─────────────────────────────────────────────────────────────────────────┘ │
-│                           │                                                  │
-│                           ▼                                                  │
-│  ┌─────────────────────────────────────────────────────────────────────────┐ │
-│  │                        LMModel Forward                                  │ │
-│  │                                                                         │ │
-│  │  codes[:, :1]     ───▶ Text Logits  ───▶ text_loss                     │ │
-│  │  codes[:, 1:17]   ───▶ Audio Logits ───▶ audio_loss                    │ │
-│  │                                        (moshi + user 구분 계산)         │ │
-│  │                                                                         │ │
-│  │  total_loss = text_loss + audio_loss                                   │ │
-│  │                                                                         │ │
-│  └─────────────────────────────────────────────────────────────────────────┘ │
-│                                                                              │
-└─────────────────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+  WAV["Stereo WAV (24kHz)<br/>L: Moshi (AI)<br/>R: User"]
+  subgraph TOK["StereoInterleavedTokenizer"]
+    subgraph MIMI["MIMI CODEC"]
+      LCH["Left Channel ── (mimi.encode) ──&gt; moshi_codes [B, 8, T]"]
+      RCH["Right Channel ── (mimi.encode) ──&gt; user_codes [B, 8, T]"]
+    end
+    subgraph INT["INTERLEAVER"]
+      JSON["JSON Alignments ──&gt; text_tokens [B, 1, T]"]
+      COMB["Combine:<br/>text_tokens [B, 1, T]<br/>moshi_codes [B, 8, T]<br/>user_codes [B, 8, T]<br/>──&gt; final_codes [B, 17, T]"]
+      JSON --> COMB
+    end
+    MIMI --> INT
+  end
+  subgraph FWD["LMModel Forward"]
+    TLOSS["codes(:, :1) ──&gt; Text Logits ──&gt; text_loss"]
+    ALOSS["codes(:, 1:17) ──&gt; Audio Logits ──&gt; audio_loss<br/>(moshi + user 구분 계산)"]
+    TOTAL["total_loss = text_loss + audio_loss"]
+    TLOSS --> TOTAL
+    ALOSS --> TOTAL
+  end
+  WAV --> TOK --> FWD
 ```
 
 ### 4.2 추론 시 데이터 흐름 (예상)
 
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                      INFERENCE DATA FLOW (Full Duplex)                       │
-├─────────────────────────────────────────────────────────────────────────────┤
-│                                                                              │
-│  ┌─────────────────────┐         ┌─────────────────────┐                     │
-│  │   User Audio        │         │   Moshi Audio       │                     │
-│  │   (Real-time Input) │         │   (Generated Output)│                     │
-│  └──────────┬──────────┘         └──────────▲──────────┘                     │
-│             │                               │                                │
-│             ▼                               │                                │
-│  ┌──────────────────────┐        ┌──────────┴──────────┐                     │
-│  │   MIMI Encode        │        │   MIMI Decode       │                     │
-│  │   User → 8 codebooks │        │   8 codebooks → WAV │                     │
-│  └──────────┬───────────┘        └──────────▲──────────┘                     │
-│             │                               │                                │
-│             │    ┌───────────────────┐      │                                │
-│             └───▶│                   │──────┘                                │
-│                  │     LMModel       │                                       │
-│                  │  (Autoregressive  │                                       │
-│                  │   Generation)     │                                       │
-│  Context ───────▶│                   │                                       │
-│  (History)       │   Input:          │                                       │
-│                  │   - User codes    │                                       │
-│                  │   - Prev Moshi    │                                       │
-│                  │                   │                                       │
-│                  │   Output:         │                                       │
-│                  │   - Next Moshi    │                                       │
-│                  │   - Text token    │                                       │
-│                  └───────────────────┘                                       │
-│                                                                              │
-└─────────────────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+  UA["User Audio<br/>(Real-time Input)"]
+  MA["Moshi Audio<br/>(Generated Output)"]
+  UENC["MIMI Encode<br/>User to 8 codebooks"]
+  MDEC["MIMI Decode<br/>8 codebooks to WAV"]
+  CTX["Context (History)"]
+  LM["LMModel<br/>(Autoregressive Generation)<br/>Input: User codes, Prev Moshi<br/>Output: Next Moshi, Text token"]
+  UA --> UENC --> LM
+  CTX --> LM
+  LM --> MDEC --> MA
 ```
 
 ---
@@ -291,53 +228,36 @@ korean:
 
 ### 5.1 Frozen vs Trained 요약
 
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                    MODULE TRAINING STATUS                                    │
-├─────────────────────────────────────────────────────────────────────────────┤
-│                                                                              │
-│  ┌─────────────────────────────────────────────────────────────────────────┐ │
-│  │                          FROZEN MODULES                                 │ │
-│  │                                                                         │ │
-│  │  ┌─────────────────────────────────────────────────────────────────┐   │ │
-│  │  │  MIMI Codec                                                     │   │ │
-│  │  │  ├── SEANet Encoder                                             │   │ │
-│  │  │  ├── Residual Vector Quantizer (RVQ)                            │   │ │
-│  │  │  └── SEANet Decoder                                             │   │ │
-│  │  │                                                                 │   │ │
-│  │  │  이유: 언어 간 전이 학습 보존                                    │   │ │
-│  │  │       오디오 표현은 언어에 독립적                                │   │ │
-│  │  └─────────────────────────────────────────────────────────────────┘   │ │
-│  └─────────────────────────────────────────────────────────────────────────┘ │
-│                                                                              │
-│  ┌─────────────────────────────────────────────────────────────────────────┐ │
-│  │                         TRAINED MODULES                                 │ │
-│  │                                                                         │ │
-│  │  ┌─────────────────────────────────────────────────────────────────┐   │ │
-│  │  │  LMModel (7B Total Parameters)                                  │   │ │
-│  │  │                                                                 │   │ │
-│  │  │  ┌─────────────────────────────────────────────────────────┐   │   │ │
-│  │  │  │  Temporal Transformer                                   │   │   │ │
-│  │  │  │  ├── Embedding Layers                                   │   │   │ │
-│  │  │  │  ├── Self-Attention Layers                              │   │   │ │
-│  │  │  │  ├── Feed-Forward Networks                              │   │   │ │
-│  │  │  │  └── Output Projection                                  │   │   │ │
-│  │  │  │                                                         │   │   │ │
-│  │  │  │  Learning Rate: tempformer_lr                           │   │   │ │
-│  │  │  └─────────────────────────────────────────────────────────┘   │   │ │
-│  │  │                                                                 │   │ │
-│  │  │  ┌─────────────────────────────────────────────────────────┐   │   │ │
-│  │  │  │  Depth Transformer (DepFormer)                          │   │   │ │
-│  │  │  │  ├── Cross-Attention Layers                             │   │   │ │
-│  │  │  │  ├── Self-Attention Layers                              │   │   │ │
-│  │  │  │  └── Codebook Prediction Heads                          │   │   │ │
-│  │  │  │                                                         │   │   │ │
-│  │  │  │  Learning Rate: depformer_lr                            │   │   │ │
-│  │  │  └─────────────────────────────────────────────────────────┘   │   │ │
-│  │  └─────────────────────────────────────────────────────────────────┘   │ │
-│  └─────────────────────────────────────────────────────────────────────────┘ │
-│                                                                              │
-└─────────────────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+  subgraph FROZEN["FROZEN MODULES"]
+    subgraph MIMI["MIMI Codec"]
+      direction TB
+      SE["SEANet Encoder"]
+      RVQ["Residual Vector Quantizer (RVQ)"]
+      SD["SEANet Decoder"]
+    end
+    REASON["이유: 언어 간 전이 학습 보존<br/>오디오 표현은 언어에 독립적"]
+  end
+  subgraph TRAINED["TRAINED MODULES"]
+    subgraph LMMODEL["LMModel (7B Total Parameters)"]
+      subgraph TT["Temporal Transformer"]
+        direction TB
+        TT1["Embedding Layers"]
+        TT2["Self-Attention Layers"]
+        TT3["Feed-Forward Networks"]
+        TT4["Output Projection"]
+        TTLR["Learning Rate: tempformer_lr"]
+      end
+      subgraph DT["Depth Transformer (DepFormer)"]
+        direction TB
+        DT1["Cross-Attention Layers"]
+        DT2["Self-Attention Layers"]
+        DT3["Codebook Prediction Heads"]
+        DTLR["Learning Rate: depformer_lr"]
+      end
+    end
+  end
 ```
 
 ### 5.2 Full Finetuning 코드 경로
@@ -525,22 +445,20 @@ def compute_audio_loss_per_speaker(
 
 ### 8.2 dep_q 차이의 의미
 
-```
-Original Moshi / J-Moshi (dep_q=8):
-┌─────────────────────────────────────────────────────────────────────────────┐
-│  Input:  Moshi Audio (8 codebooks) + Context                                │
-│  Output: Next Moshi Audio (8 codebooks) + Text                              │
-│                                                                              │
-│  User의 음성은 별도 처리 또는 무시됨                                         │
-└─────────────────────────────────────────────────────────────────────────────┘
-
-K-Moshi (dep_q=16):
-┌─────────────────────────────────────────────────────────────────────────────┐
-│  Input:  Moshi Audio (8) + User Audio (8) + Context                         │
-│  Output: Next Moshi Audio (8) + Next User Audio (8) + Text                  │
-│                                                                              │
-│  User와 Moshi의 음성을 동시에 모델링 → Full Duplex 가능                      │
-└─────────────────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+  subgraph A["Original Moshi / J-Moshi (dep_q=8)"]
+    A1["Input: Moshi Audio (8 codebooks) + Context"]
+    A2["Output: Next Moshi Audio (8 codebooks) + Text"]
+    A3["User의 음성은 별도 처리 또는 무시됨"]
+    A1 --> A2 --> A3
+  end
+  subgraph K["K-Moshi (dep_q=16)"]
+    K1["Input: Moshi Audio (8) + User Audio (8) + Context"]
+    K2["Output: Next Moshi Audio (8) + Next User Audio (8) + Text"]
+    K3["User와 Moshi의 음성을 동시에 모델링 → Full Duplex 가능"]
+    K1 --> K2 --> K3
+  end
 ```
 
 ### 8.3 학습 방식 비교

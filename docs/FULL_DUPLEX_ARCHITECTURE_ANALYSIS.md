@@ -33,40 +33,23 @@
 
 ### 2.1 핵심 구조
 
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                          Moshi Architecture                                  │
-├─────────────────────────────────────────────────────────────────────────────┤
-│                                                                             │
-│  Input: codes [B, K, T]  (K = 1 text + 8 audio codebooks = 9 total)        │
-│                                                                             │
-│  ┌─────────────────────────────────────────────────────────────────────┐    │
-│  │                        Embedding Layer                               │    │
-│  │  ┌──────────────┐  ┌──────────────────────────────────────────────┐ │    │
-│  │  │ text_emb     │  │ emb[0..7] (audio codebook embeddings)        │ │    │
-│  │  │ (32K vocab)  │  │ (1024 vocab each)                            │ │    │
-│  │  └──────────────┘  └──────────────────────────────────────────────┘ │    │
-│  │                                                                     │    │
-│  │  input_ = text_emb + sum(emb[i] for i in 0..7)  # 모두 더함        │    │
-│  └─────────────────────────────────────────────────────────────────────┘    │
-│                              │                                              │
-│                              ▼                                              │
-│  ┌─────────────────────────────────────────────────────────────────────┐    │
-│  │                    Main Transformer (7B)                             │    │
-│  │  - d_model: 4096, num_heads: 32, num_layers: 32                     │    │
-│  │  - Streaming Transformer with causal attention                      │    │
-│  └─────────────────────────────────────────────────────────────────────┘    │
-│                              │                                              │
-│                              ├──────────────────────┐                       │
-│                              ▼                      ▼                       │
-│  ┌─────────────────────────────────┐  ┌─────────────────────────────────┐  │
-│  │    text_linear                  │  │         Depformer               │  │
-│  │  (dim → text_card = 32K)        │  │  - 8 output codebooks           │  │
-│  │  → Text Logits                  │  │  - Per-step processing          │  │
-│  └─────────────────────────────────┘  │  → Audio Logits                 │  │
-│                                       └─────────────────────────────────┘  │
-│                                                                             │
-└─────────────────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    IN["Input: codes [B, K, T] (K = 1 text + 8 audio codebooks = 9 total)"]
+    subgraph EMB["Embedding Layer"]
+        TE["text_emb (32K vocab)"]
+        AE["emb[0..7] audio codebook embeddings (1024 vocab each)"]
+        SUM["input_ = text_emb + sum(emb[i] for i in 0..7) (모두 더함)"]
+        TE --> SUM
+        AE --> SUM
+    end
+    MT["Main Transformer (7B): d_model 4096, num_heads 32, num_layers 32, Streaming Transformer with causal attention"]
+    TL["text_linear (dim to text_card = 32K) produces Text Logits"]
+    DF["Depformer: 8 output codebooks, Per-step processing, produces Audio Logits"]
+    IN --> EMB
+    EMB --> MT
+    MT --> TL
+    MT --> DF
 ```
 
 ### 2.2 Moshi의 Voice Control 부재 이유
@@ -90,21 +73,17 @@ input_ = text_emb if input_ is None else input_ + text_emb
 
 ### 2.3 Moshi Data Format
 
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                     Stereo WAV (24kHz)                                       │
-├─────────────────────────────────────────────────────────────────────────────┤
-│                                                                             │
-│  Left Channel (SPEAKER_MAIN = Moshi)    Right Channel (SPEAKER_USER)       │
-│  ┌─────────────────────────────────┐    ┌─────────────────────────────────┐ │
-│  │ AI가 생성할 음성                │    │ 사용자 입력 음성               │ │
-│  │ - 단일 화자로 학습됨            │    │ - 다양한 화자 가능             │ │
-│  │ - 목소리 = 데이터 분포          │    │ - Inference: 마이크 입력       │ │
-│  └─────────────────────────────────┘    └─────────────────────────────────┘ │
-│                                                                             │
-│  → Mimi Encoder → codes [B, 9, T] (1 text + 8 audio)                       │
-│                                                                             │
-└─────────────────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    subgraph WAV["Stereo WAV (24kHz)"]
+        L["Left Channel (SPEAKER_MAIN = Moshi): AI가 생성할 음성 - 단일 화자로 학습됨 - 목소리 = 데이터 분포"]
+        R["Right Channel (SPEAKER_USER): 사용자 입력 음성 - 다양한 화자 가능 - Inference: 마이크 입력"]
+    end
+    MIMI["Mimi Encoder"]
+    CODES["codes [B, 9, T] (1 text + 8 audio)"]
+    L --> MIMI
+    R --> MIMI
+    MIMI --> CODES
 ```
 
 ---
@@ -113,34 +92,26 @@ input_ = text_emb if input_ is None else input_ + text_emb
 
 ### 3.1 Voice Embedding 메커니즘
 
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                    PersonaPlex Hybrid Prompting                              │
-├─────────────────────────────────────────────────────────────────────────────┤
-│                                                                             │
-│  1. Voice Prompt (Audio Tokens)                                             │
-│  ┌─────────────────────────────────────────────────────────────────────┐    │
-│  │ load_voice_prompt("NATF2.pt")                                       │    │
-│  │                                                                     │    │
-│  │ Option A: Audio File → Mimi Encode → Sequential Replay              │    │
-│  │ Option B: Pre-computed Embedding (.pt) → Direct Cache Load          │    │
-│  │                                                                     │    │
-│  │ _step_voice_prompt_core():                                          │    │
-│  │   - Replay cached embeddings through model                          │    │
-│  │   - state.cache.copy_(self.voice_prompt_cache)  ← 캐시 동기화      │    │
-│  └─────────────────────────────────────────────────────────────────────┘    │
-│                                                                             │
-│  2. Text Prompt (Role Definition)                                           │
-│  ┌─────────────────────────────────────────────────────────────────────┐    │
-│  │ text_prompt_tokens = tokenize("You work for First Neuron Bank...")  │    │
-│  │                                                                     │    │
-│  │ Processing Order:                                                   │    │
-│  │   voice_prompt → audio_silence → text_prompt → audio_silence        │    │
-│  └─────────────────────────────────────────────────────────────────────┘    │
-│                                                                             │
-│  → Voice + Text jointly condition all subsequent generation                │
-│                                                                             │
-└─────────────────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    subgraph VP["1. Voice Prompt (Audio Tokens)"]
+        LOAD["load_voice_prompt('NATF2.pt')"]
+        OA["Option A: Audio File to Mimi Encode to Sequential Replay"]
+        OB["Option B: Pre-computed Embedding (.pt) to Direct Cache Load"]
+        STEP["_step_voice_prompt_core(): Replay cached embeddings through model, state.cache.copy_(self.voice_prompt_cache) (캐시 동기화)"]
+        LOAD --> OA
+        LOAD --> OB
+        OA --> STEP
+        OB --> STEP
+    end
+    subgraph TP["2. Text Prompt (Role Definition)"]
+        TOK["text_prompt_tokens = tokenize('You work for First Neuron Bank...')"]
+        ORDER["Processing Order: voice_prompt to audio_silence to text_prompt to audio_silence"]
+        TOK --> ORDER
+    end
+    OUT["Voice + Text jointly condition all subsequent generation"]
+    VP --> OUT
+    TP --> OUT
 ```
 
 ### 3.2 PersonaPlex의 Voice Embedding 저장 방식
@@ -173,48 +144,30 @@ voices = {
 
 ### 4.1 아키텍처 개요
 
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                         F-actor Architecture                                 │
-├─────────────────────────────────────────────────────────────────────────────┤
-│                                                                             │
-│  ┌─────────────────────────────────────────────────────────────────────┐    │
-│  │                   Instruction Prefix                                 │    │
-│  │  ┌─────────────────────────┐   ┌─────────────────────────────────┐  │    │
-│  │  │ Speaker Embedding       │ + │ Text Instruction                 │  │    │
-│  │  │ (ECAPA-TDNN, 5초 샘플)  │   │ (Role, Topic, Behavior)          │  │    │
-│  │  │ → LLM token space 투영  │   │ → Tokenized                      │  │    │
-│  │  └─────────────────────────┘   └─────────────────────────────────┘  │    │
-│  │                              │                                      │    │
-│  │                              ▼                                      │    │
-│  │  [Speaker_Emb] [Text_Tokens...] ← Concatenated Prefix               │    │
-│  └─────────────────────────────────────────────────────────────────────┘    │
-│                              │                                              │
-│                              ▼                                              │
-│  ┌─────────────────────────────────────────────────────────────────────┐    │
-│  │                Audio Streams (FSQ Quantization)                      │    │
-│  │                                                                     │    │
-│  │  User Stream:   [DAU₁ᵘ] [DAU₂ᵘ] [DAU₃ᵘ] [DAU₄ᵘ] (4 codebooks)     │    │
-│  │  System Stream: [DAU₁ˢ] [DAU₂ˢ] [DAU₃ˢ] [DAU₄ˢ] (4 codebooks)     │    │
-│  │                                                                     │    │
-│  │  Embedding: x = Σ(user,sys) Σ(i=1..4) Embed(DAUᵢˢ)                 │    │
-│  └─────────────────────────────────────────────────────────────────────┘    │
-│                              │                                              │
-│                              ▼                                              │
-│  ┌─────────────────────────────────────────────────────────────────────┐    │
-│  │              LLM Backbone (Llama3.2-1B-Instruct)                     │    │
-│  │              - Audio encoder FROZEN                                 │    │
-│  │              - LLM만 fine-tuning                                    │    │
-│  └─────────────────────────────────────────────────────────────────────┘    │
-│                              │                                              │
-│                              ▼                                              │
-│  ┌─────────────────────────────────────────────────────────────────────┐    │
-│  │                    8 Linear Output Heads                             │    │
-│  │  User: [Head₁ᵘ] [Head₂ᵘ] [Head₃ᵘ] [Head₄ᵘ] (학습 시에만 사용)      │    │
-│  │  System: [Head₁ˢ] [Head₂ˢ] [Head₃ˢ] [Head₄ˢ] (추론 시 사용)        │    │
-│  └─────────────────────────────────────────────────────────────────────┘    │
-│                                                                             │
-└─────────────────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    subgraph PREFIX["Instruction Prefix"]
+        SPK["Speaker Embedding (ECAPA-TDNN, 5초 샘플) to LLM token space 투영"]
+        TXT["Text Instruction (Role, Topic, Behavior) to Tokenized"]
+        CAT["[Speaker_Emb] [Text_Tokens...] (Concatenated Prefix)"]
+        SPK --> CAT
+        TXT --> CAT
+    end
+    subgraph STREAMS["Audio Streams (FSQ Quantization)"]
+        US["User Stream: DAU1u DAU2u DAU3u DAU4u (4 codebooks)"]
+        SS["System Stream: DAU1s DAU2s DAU3s DAU4s (4 codebooks)"]
+        EMB["Embedding: x = sum(user,sys) sum(i=1..4) Embed(DAUis)"]
+        US --> EMB
+        SS --> EMB
+    end
+    LLM["LLM Backbone (Llama3.2-1B-Instruct): Audio encoder FROZEN, LLM만 fine-tuning"]
+    subgraph HEADS["8 Linear Output Heads"]
+        UH["User: Head1u Head2u Head3u Head4u (학습 시에만 사용)"]
+        SH["System: Head1s Head2s Head3s Head4s (추론 시 사용)"]
+    end
+    PREFIX --> STREAMS
+    STREAMS --> LLM
+    LLM --> HEADS
 ```
 
 ### 4.2 F-actor의 핵심 혁신
@@ -393,130 +346,45 @@ training:
 
 ### 7.1 Option A: F-actor 스타일 (권장)
 
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                    K-Moshi Option A: F-actor 스타일                          │
-├─────────────────────────────────────────────────────────────────────────────┤
-│                                                                             │
-│  [Korean Speaker Embedding]     +     [Korean Text Instruction]             │
-│         │                                      │                            │
-│         │ ECAPA-TDNN                          │ Korean Tokenizer            │
-│         │ (한국어 화자 특화)                   │ (Custom 또는 기존)          │
-│         ▼                                      ▼                            │
-│  ┌───────────────────────────────────────────────────────────────────┐      │
-│  │              Concatenated Instruction Prefix                       │      │
-│  │  [Spk_Emb] [당신은 케이모시입니다...] [대화를 시작하세요]         │      │
-│  └───────────────────────────────────────────────────────────────────┘      │
-│                              │                                              │
-│                              ▼                                              │
-│  ┌───────────────────────────────────────────────────────────────────┐      │
-│  │                   Audio Streams (FSQ 또는 RVQ)                     │      │
-│  │  User: [Korean input audio tokens]                                │      │
-│  │  System: [K-Moshi output audio tokens]                            │      │
-│  └───────────────────────────────────────────────────────────────────┘      │
-│                              │                                              │
-│                              ▼                                              │
-│  ┌───────────────────────────────────────────────────────────────────┐      │
-│  │           LLM Backbone (Moshi 7B or Korean LLM)                    │      │
-│  │           - Audio Encoder: Mimi (frozen)                          │      │
-│  │           - LLM: Fine-tuning with LoRA                            │      │
-│  └───────────────────────────────────────────────────────────────────┘      │
-│                              │                                              │
-│                              ▼                                              │
-│  ┌───────────────────────────────────────────────────────────────────┐      │
-│  │                    Output Heads                                    │      │
-│  │  Text: Korean text logits                                         │      │
-│  │  Audio: Korean audio codebook logits                              │      │
-│  └───────────────────────────────────────────────────────────────────┘      │
-│                                                                             │
-└─────────────────────────────────────────────────────────────────────────────┘
-
-장점:
-- 2,000시간 수준 데이터로 학습 가능
-- Speaker embedding으로 화자 제어
-- Instruction following 능력 획득
-- 기존 Moshi 호환 가능
-
-단점:
-- ECAPA-TDNN 추가 필요
-- FSQ 사용 시 아키텍처 수정 필요
+```mermaid
+flowchart TD
+    SPK["Korean Speaker Embedding"]
+    TXT["Korean Text Instruction"]
+    SPKP["ECAPA-TDNN (한국어 화자 특화)"]
+    TXTP["Korean Tokenizer (Custom 또는 기존)"]
+    PREFIX["Concatenated Instruction Prefix: [Spk_Emb] [당신은 케이모시입니다...] [대화를 시작하세요]"]
+    STREAMS["Audio Streams (FSQ 또는 RVQ): User [Korean input audio tokens], System [K-Moshi output audio tokens]"]
+    LLM["LLM Backbone (Moshi 7B or Korean LLM): Audio Encoder Mimi (frozen), LLM Fine-tuning with LoRA"]
+    HEADS["Output Heads: Text Korean text logits, Audio Korean audio codebook logits"]
+    SPK --> SPKP
+    TXT --> TXTP
+    SPKP --> PREFIX
+    TXTP --> PREFIX
+    PREFIX --> STREAMS
+    STREAMS --> LLM
+    LLM --> HEADS
 ```
 
 ### 7.2 Option B: PersonaPlex 스타일 (보수적)
 
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                  K-Moshi Option B: PersonaPlex 스타일                        │
-├─────────────────────────────────────────────────────────────────────────────┤
-│                                                                             │
-│  1. K-Moshi Voice Embedding 생성 (1회)                                      │
-│  ┌───────────────────────────────────────────────────────────────────┐      │
-│  │  - 한국어 참조 음성 (10-30초)                                      │      │
-│  │  - Mimi encode → audio tokens → .pt 저장                          │      │
-│  │  - KMOSHI_V1.pt (단일 화자)                                       │      │
-│  └───────────────────────────────────────────────────────────────────┘      │
-│                                                                             │
-│  2. Text Prompt 정의                                                        │
-│  ┌───────────────────────────────────────────────────────────────────┐      │
-│  │  "당신은 케이모시(K-Moshi)입니다.                                  │      │
-│  │   한국어 AI 음성 비서입니다.                 │      │
-│  │   친절하고 따뜻한 말투를 사용합니다..."                            │      │
-│  └───────────────────────────────────────────────────────────────────┘      │
-│                                                                             │
-│  3. Inference Time                                                          │
-│  ┌───────────────────────────────────────────────────────────────────┐      │
-│  │  load_voice_prompt("KMOSHI_V1.pt")                                │      │
-│  │  set_text_prompt(korean_instruction)                              │      │
-│  │  → 원본 Moshi 아키텍처 그대로 사용                                │      │
-│  └───────────────────────────────────────────────────────────────────┘      │
-│                                                                             │
-└─────────────────────────────────────────────────────────────────────────────┘
-
-장점:
-- Moshi 아키텍처 수정 최소화
-- 검증된 PersonaPlex 방식 활용
-- 빠른 구현 가능
-
-단점:
-- Voice 다양성 제한 (고정 embedding)
-- Instruction following 능력 약함
-- 새 화자 추가 시 재학습 필요
+```mermaid
+flowchart TD
+    P1["1. K-Moshi Voice Embedding 생성 (1회): 한국어 참조 음성 (10-30초), Mimi encode to audio tokens to .pt 저장, KMOSHI_V1.pt (단일 화자)"]
+    P2["2. Text Prompt 정의: '당신은 케이모시(K-Moshi)입니다. 한국어 AI 음성 비서입니다. 친절하고 따뜻한 말투를 사용합니다...'"]
+    P3["3. Inference Time: load_voice_prompt('KMOSHI_V1.pt'), set_text_prompt(korean_instruction), 원본 Moshi 아키텍처 그대로 사용"]
+    P1 --> P2
+    P2 --> P3
 ```
 
 ### 7.3 Option C: 하이브리드 (최적)
 
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                    K-Moshi Option C: 하이브리드 (권장)                       │
-├─────────────────────────────────────────────────────────────────────────────┤
-│                                                                             │
-│  Phase 1: PersonaPlex 스타일로 빠른 프로토타입                              │
-│  ┌───────────────────────────────────────────────────────────────────┐      │
-│  │  - 기존 Moshi 아키텍처 유지                                        │      │
-│  │  - K-Moshi voice embedding (.pt) 생성                             │      │
-│  │  - 한국어 데이터로 fine-tuning                                     │      │
-│  │  - 목표: 기본 한국어 대화 능력                                     │      │
-│  └───────────────────────────────────────────────────────────────────┘      │
-│                              │                                              │
-│                              ▼                                              │
-│  Phase 2: F-actor 스타일로 확장                                             │
-│  ┌───────────────────────────────────────────────────────────────────┐      │
-│  │  - ECAPA-TDNN speaker encoder 추가                                │      │
-│  │  - Instruction prefix 시스템 구현                                 │      │
-│  │  - Instruction-following 데이터 추가                              │      │
-│  │  - 목표: 화자 제어 + 행동 제어                                     │      │
-│  └───────────────────────────────────────────────────────────────────┘      │
-│                              │                                              │
-│                              ▼                                              │
-│  Phase 3: 최적화 (선택)                                                     │
-│  ┌───────────────────────────────────────────────────────────────────┐      │
-│  │  - FSQ 전환 검토 (RVQ → FSQ)                                      │      │
-│  │  - MCTP 모듈 적용 검토 (VITA-Audio 참고)                          │      │
-│  │  - Dual-Resolution 검토 (Fun-Audio-Chat 참고)                     │      │
-│  │  - 목표: 추론 속도 최적화                                          │      │
-│  └───────────────────────────────────────────────────────────────────┘      │
-│                                                                             │
-└─────────────────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    P1["Phase 1: PersonaPlex 스타일로 빠른 프로토타입 - 기존 Moshi 아키텍처 유지, K-Moshi voice embedding (.pt) 생성, 한국어 데이터로 fine-tuning, 목표: 기본 한국어 대화 능력"]
+    P2["Phase 2: F-actor 스타일로 확장 - ECAPA-TDNN speaker encoder 추가, Instruction prefix 시스템 구현, Instruction-following 데이터 추가, 목표: 화자 제어 + 행동 제어"]
+    P3["Phase 3: 최적화 (선택) - FSQ 전환 검토 (RVQ to FSQ), MCTP 모듈 적용 검토 (VITA-Audio 참고), Dual-Resolution 검토 (Fun-Audio-Chat 참고), 목표: 추론 속도 최적화"]
+    P1 --> P2
+    P2 --> P3
 ```
 
 ---

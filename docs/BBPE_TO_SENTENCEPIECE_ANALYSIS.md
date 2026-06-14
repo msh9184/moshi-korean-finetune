@@ -45,31 +45,55 @@ This document analyzes the feasibility and technical approach for converting the
 
 ### 2.1 Fortunate Compatibility: Byte Token Format
 
-```
-HFLM BBPE                    SentencePiece BPE
-===========                    =================
-<0x00>  (ID 53)                <0x00>  (type=BYTE)
-<0x01>  (ID 54)                <0x01>  (type=BYTE)
-...                            ...
-<0xFF>  (ID 308)               <0xFF>  (type=BYTE)
-
-✅ IDENTICAL FORMAT - No conversion needed!
+```mermaid
+flowchart LR
+  subgraph HF["HFLM BBPE"]
+    H0["(0x00) (ID 53)"]
+    H1["(0x01) (ID 54)"]
+    HD["..."]
+    HF255["(0xFF) (ID 308)"]
+  end
+  subgraph SP["SentencePiece BPE"]
+    S0["(0x00) (type=BYTE)"]
+    S1["(0x01) (type=BYTE)"]
+    SD["..."]
+    SF255["(0xFF) (type=BYTE)"]
+  end
+  H0 -->|"identical"| S0
+  H1 -->|"identical"| S1
+  HD --> SD
+  HF255 -->|"identical"| SF255
+  HF -.->|"IDENTICAL FORMAT - No conversion needed!"| SP
 ```
 
 This is a **critical compatibility win**. the HF LM's byte token format (`<0xHH>`) exactly matches SentencePiece's BYTE piece format.
 
 ### 2.2 Merge Order → Score Conversion
 
-```
-BPE Merges (Order-based)       SentencePiece Scores
-========================       ====================
-merge[0]: "h e"      →         "he":  score = -N
-merge[1]: "t h"      →         "th":  score = -(N-1)
-merge[2]: "the "     →         "the": score = -(N-2)
-...                            ...
-merge[N-1]: "xyz"    →         "xyz": score = -1
-
-Base tokens (not merged):      score = 0.0
+```mermaid
+flowchart LR
+  subgraph M["BPE Merges (Order-based)"]
+    M0["merge[0]: h e"]
+    M1["merge[1]: t h"]
+    M2["merge[2]: the (space)"]
+    MD["..."]
+    MN["merge[N-1]: xyz"]
+    MB["Base tokens (not merged)"]
+  end
+  subgraph S["SentencePiece Scores"]
+    S0["he: score = -N"]
+    S1["th: score = -(N-1)"]
+    S2["the: score = -(N-2)"]
+    SD["..."]
+    SN["xyz: score = -1"]
+    SB["score = 0.0"]
+  end
+  M0 --> S0
+  M1 --> S1
+  M2 --> S2
+  MD --> SD
+  MN --> SN
+  MB --> SB
 ```
 
 **Algorithm:**

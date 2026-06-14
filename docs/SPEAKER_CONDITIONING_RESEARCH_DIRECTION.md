@@ -19,18 +19,18 @@
 
 ### 1.2 현재 Moshi 아키텍처의 Speaker Conditioning
 
-```
-현재 상태:
-┌─────────────────────────────────────────────────────────────────┐
-│ Temporal Transformer                                            │
-│   sum_condition → 지원 (ConditionFuser.get_sum)                │
-│   cross_attention → 지원 (ConditionFuser.get_cross)            │
-│   prepend → 코드 존재하나 현재 사용 안 함                        │
-├─────────────────────────────────────────────────────────────────┤
-│ Depformer                                                       │
-│   speaker conditioning → ❌ 없음                                │
-│   cross_attention → ❌ 없음                                     │
-└─────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    subgraph TT["Temporal Transformer"]
+        S["sum_condition (지원, ConditionFuser.get_sum)"]
+        C["cross_attention (지원, ConditionFuser.get_cross)"]
+        P["prepend (코드 존재하나 현재 사용 안 함)"]
+    end
+    subgraph DF["Depformer"]
+        D1["speaker conditioning (없음)"]
+        D2["cross_attention (없음)"]
+    end
+    TT --> DF
 ```
 
 ---
@@ -50,32 +50,15 @@
 
 ### 2.2 정보 분해 모델
 
-```
-Reference Audio (5-30초)
-         │
-         ├──────────────────────────────────────────┐
-         │                                          │
-         ▼                                          ▼
-┌─────────────────────┐                 ┌──────────────────────┐
-│  Speaker Encoder    │                 │   Mimi Encoder       │
-│  (ECAPA-TDNN)       │                 │   (8 RVQ codebooks)  │
-└─────────────────────┘                 └──────────────────────┘
-         │                                          │
-         ▼                                          ▼
-┌─────────────────────┐                 ┌──────────────────────┐
-│ speaker_emb [1,192] │                 │ audio_tokens [T, 8]  │
-│                     │                 │                      │
-│ 포함 정보:          │                 │ 포함 정보:           │
-│ - Voice timbre      │                 │ - Prosody patterns   │
-│ - Pitch range       │                 │ - Speaking rate      │
-│ - Formant structure │                 │ - Intonation         │
-│ - Speaker identity  │                 │ - Emotional tone     │
-│                     │                 │ - Rhythm             │
-└─────────────────────┘                 └──────────────────────┘
-         │                                          │
-         ▼                                          ▼
-   [Global Condition]                      [Local Context]
-   "이 사람의 목소리로"                    "이렇게 말하면서"
+```mermaid
+flowchart TD
+    REF["Reference Audio (5-30초)"]
+    REF --> SE["Speaker Encoder (ECAPA-TDNN)"]
+    REF --> ME["Mimi Encoder (8 RVQ codebooks)"]
+    SE --> SEMB["speaker_emb [1,192]<br/>포함 정보:<br/>- Voice timbre<br/>- Pitch range<br/>- Formant structure<br/>- Speaker identity"]
+    ME --> ATOK["audio_tokens [T, 8]<br/>포함 정보:<br/>- Prosody patterns<br/>- Speaking rate<br/>- Intonation<br/>- Emotional tone<br/>- Rhythm"]
+    SEMB --> GC["[Global Condition]<br/>이 사람의 목소리로"]
+    ATOK --> LC["[Local Context]<br/>이렇게 말하면서"]
 ```
 
 ### 2.3 상호 보완성
@@ -135,57 +118,24 @@ class ConditionFuser:
 
 ### 3.3 제안 설계
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                    PROPOSED ARCHITECTURE                         │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                  │
-│  Reference Audio ─────┬─────────────────────────────────────┐   │
-│                       │                                     │   │
-│                       ▼                                     ▼   │
-│  ┌─────────────────────────┐         ┌───────────────────────┐ │
-│  │ Speaker Encoder         │         │ Mimi Encoder          │ │
-│  │ (ECAPA-TDNN, frozen)    │         │ (frozen)              │ │
-│  └───────────┬─────────────┘         └───────────┬───────────┘ │
-│              │                                   │             │
-│              ▼                                   ▼             │
-│  ┌─────────────────────────┐         ┌───────────────────────┐ │
-│  │ speaker_emb [B, 1, 192] │         │ ref_codes [B, T, 8]   │ │
-│  └───────────┬─────────────┘         └───────────┬───────────┘ │
-│              │                                   │             │
-│              ▼                                   ▼             │
-│  ┌─────────────────────────┐         ┌───────────────────────┐ │
-│  │ Linear(192 → 4096)      │         │ Audio Embeddings      │ │
-│  │ (learnable)             │         │ (shared with main)    │ │
-│  └───────────┬─────────────┘         └───────────┬───────────┘ │
-│              │                                   │             │
-│              │ sum_condition                     │ cross_src   │
-│              │ [B, 1, 4096]                      │ [B, T, 4096]│
-│              │                                   │             │
-│              └────────────┬──────────────────────┘             │
-│                           │                                    │
-│                           ▼                                    │
-│  ┌──────────────────────────────────────────────────────────┐ │
-│  │              TEMPORAL TRANSFORMER                         │ │
-│  │                                                           │ │
-│  │  input_ = text_emb + Σaudio_emb + sum_condition          │ │
-│  │                                                           │ │
-│  │  transformer(input_, cross_attention_src=cross_src)      │ │
-│  │                                                           │ │
-│  └──────────────────────────────────────────────────────────┘ │
-│                           │                                    │
-│                           ▼                                    │
-│  ┌──────────────────────────────────────────────────────────┐ │
-│  │              DEPFORMER (Enhanced)                         │ │
-│  │                                                           │ │
-│  │  Option A: transformer_out에서 간접 전달 (현재)           │ │
-│  │  Option B: acoustic_condition 직접 주입 (제안)            │ │
-│  │                                                           │ │
-│  │  depformer_input = proj(transformer_out)                 │ │
-│  │                   + prev_token                            │ │
-│  │                   + acoustic_spk_emb  ← NEW              │ │
-│  └──────────────────────────────────────────────────────────┘ │
-└─────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    REF["Reference Audio"]
+    REF --> SE["Speaker Encoder (ECAPA-TDNN, frozen)"]
+    REF --> ME["Mimi Encoder (frozen)"]
+    SE --> SEMB["speaker_emb [B, 1, 192]"]
+    ME --> RC["ref_codes [B, T, 8]"]
+    SEMB --> LIN["Linear(192 to 4096) (learnable)"]
+    RC --> AE["Audio Embeddings (shared with main)"]
+    LIN -->|"sum_condition [B, 1, 4096]"| TT
+    AE -->|"cross_src [B, T, 4096]"| TT
+    subgraph TT["TEMPORAL TRANSFORMER"]
+        TTIN["input_ = text_emb + Σaudio_emb + sum_condition<br/>transformer(input_, cross_attention_src=cross_src)"]
+    end
+    TT --> DEP
+    subgraph DEP["DEPFORMER (Enhanced)"]
+        DOPT["Option A: transformer_out에서 간접 전달 (현재)<br/>Option B: acoustic_condition 직접 주입 (제안)<br/>depformer_input = proj(transformer_out)<br/>+ prev_token<br/>+ acoustic_spk_emb  (NEW)"]
+    end
 ```
 
 ---

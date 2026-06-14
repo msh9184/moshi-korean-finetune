@@ -20,29 +20,21 @@
 
 ### 1.1 세 가지 주요 접근법
 
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                     Full-Duplex Dialogue 데이터 생성 방법                      │
-├─────────────────────────────────────────────────────────────────────────────┤
-│                                                                             │
-│  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────────────────┐  │
-│  │  Approach A     │  │  Approach B     │  │  Approach C                 │  │
-│  │  J-Moshi Style  │  │  External TTS   │  │  Hybrid                     │  │
-│  │                 │  │                 │  │                             │  │
-│  │  K-Moshi 모델을  │  │  외부 한국어 TTS │  │  초기: External TTS         │  │
-│  │  TTS로 활용     │  │  모델 활용       │  │  후기: K-Moshi Self-Gen     │  │
-│  └─────────────────┘  └─────────────────┘  └─────────────────────────────┘  │
-│                                                                             │
-│  장점:                 장점:                 장점:                           │
-│  - 도메인 일치         - 즉시 시작 가능       - 점진적 품질 향상              │
-│  - Self-improvement   - 고품질 한국어 TTS    - 리스크 분산                   │
-│  - J-Moshi 검증됨      - 다양한 음색 선택                                    │
-│                                                                             │
-│  단점:                 단점:                 단점:                           │
-│  - 초기 모델 필요      - 도메인 불일치        - 복잡한 파이프라인             │
-│  - Bootstrap 필요     - Overlap 처리 어려움  - 전환 시점 결정 필요           │
-│                                                                             │
-└─────────────────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    Title["Full-Duplex Dialogue 데이터 생성 방법"]
+    Title --> A
+    Title --> B
+    Title --> C
+    A["Approach A: J-Moshi Style<br/>K-Moshi 모델을 TTS로 활용"]
+    B["Approach B: External TTS<br/>외부 한국어 TTS 모델 활용"]
+    C["Approach C: Hybrid<br/>초기: External TTS<br/>후기: K-Moshi Self-Gen"]
+    A --> Apros["장점:<br/>- 도메인 일치<br/>- Self-improvement<br/>- J-Moshi 검증됨"]
+    A --> Acons["단점:<br/>- 초기 모델 필요<br/>- Bootstrap 필요"]
+    B --> Bpros["장점:<br/>- 즉시 시작 가능<br/>- 고품질 한국어 TTS<br/>- 다양한 음색 선택"]
+    B --> Bcons["단점:<br/>- 도메인 불일치<br/>- Overlap 처리 어려움"]
+    C --> Cpros["장점:<br/>- 점진적 품질 향상<br/>- 리스크 분산"]
+    C --> Ccons["단점:<br/>- 복잡한 파이프라인<br/>- 전환 시점 결정 필요"]
 ```
 
 ### 1.2 방법별 상세 비교
@@ -64,35 +56,13 @@
 
 J-Moshi가 검증한 방법으로, 학습된 Moshi 모델 자체를 TTS로 활용하여 대화 데이터를 생성합니다.
 
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                    J-Moshi Multi-stream TTS Pipeline                        │
-├─────────────────────────────────────────────────────────────────────────────┤
-│                                                                             │
-│  [텍스트 대화 코퍼스]                                                         │
-│         │                                                                   │
-│         ▼                                                                   │
-│  ┌─────────────────┐                                                        │
-│  │ LLM Rewriting   │  "안녕하세요" → "아~ 안녕하세요~"                         │
-│  │ (Gemma-2-27B)   │  문어체 → 구어체 변환                                    │
-│  └────────┬────────┘                                                        │
-│           │                                                                 │
-│           ▼                                                                 │
-│  ┌─────────────────┐                                                        │
-│  │ K-Moshi Model   │  Multi-stream Generation                               │
-│  │ (as TTS)        │  - Semantic Delay: 25                                  │
-│  └────────┬────────┘  - Acoustic Delay: 27                                  │
-│           │                                                                 │
-│           ▼                                                                 │
-│  ┌─────────────────┐                                                        │
-│  │ Sample Selection│  10개 샘플 생성 → 최저 WER 선택                          │
-│  │ (WER-based)     │                                                        │
-│  └────────┬────────┘                                                        │
-│           │                                                                 │
-│           ▼                                                                 │
-│  [Stereo WAV + Word Timestamps]                                             │
-│                                                                             │
-└─────────────────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    IN["텍스트 대화 코퍼스"]
+    IN --> LLM["LLM Rewriting (Gemma-2-27B)<br/>안녕하세요 → 아~ 안녕하세요~<br/>문어체 → 구어체 변환"]
+    LLM --> MODEL["K-Moshi Model (as TTS)<br/>Multi-stream Generation<br/>- Semantic Delay: 25<br/>- Acoustic Delay: 27"]
+    MODEL --> SEL["Sample Selection (WER-based)<br/>10개 샘플 생성 → 최저 WER 선택"]
+    SEL --> OUT["Stereo WAV + Word Timestamps"]
 ```
 
 ### 2.2 J-Moshi의 실제 구현 (참조)
@@ -297,43 +267,18 @@ class KoreanMultistreamGenerator:
 
 ### 3.2 Nari Labs Dia 활용 파이프라인
 
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                    External TTS Pipeline (Nari Labs Dia)                    │
-├─────────────────────────────────────────────────────────────────────────────┤
-│                                                                             │
-│  [한국어 텍스트 대화]                                                         │
-│         │                                                                   │
-│         ▼                                                                   │
-│  ┌─────────────────────────────────────────────────────────────────────┐   │
-│  │ Speaker A (Moshi)          │ Speaker B (User)                       │   │
-│  │ - 고정 Reference Audio     │ - 다양한 Reference Audio               │   │
-│  │ - Nari Labs Dia TTS        │ - XTTS v2 또는 다른 TTS               │   │
-│  └──────────────┬─────────────┴──────────────────┬─────────────────────┘   │
-│                 │                                 │                         │
-│                 ▼                                 ▼                         │
-│  ┌─────────────────────────────────────────────────────────────────────┐   │
-│  │                    Timing Scheduler                                 │   │
-│  │  - 턴 기반 타이밍 계산                                               │   │
-│  │  - Overlap 구간 삽입                                                 │   │
-│  │  - 자연스러운 간격 추가                                               │   │
-│  └──────────────────────────────┬──────────────────────────────────────┘   │
-│                                 │                                          │
-│                                 ▼                                          │
-│  ┌─────────────────────────────────────────────────────────────────────┐   │
-│  │                    Stereo Mixer                                     │   │
-│  │  L Channel: Speaker A (Moshi)                                       │   │
-│  │  R Channel: Speaker B (User)                                        │   │
-│  └──────────────────────────────┬──────────────────────────────────────┘   │
-│                                 │                                          │
-│                                 ▼                                          │
-│  ┌─────────────────────────────────────────────────────────────────────┐   │
-│  │                    WhisperX Alignment                               │   │
-│  │  - 각 채널별 word-level timestamp 추출                               │   │
-│  │  - JSON 형식 저장                                                   │   │
-│  └─────────────────────────────────────────────────────────────────────┘   │
-│                                                                             │
-└─────────────────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    IN["한국어 텍스트 대화"]
+    IN --> SPK
+    subgraph SPK["화자별 TTS"]
+        direction LR
+        A["Speaker A (Moshi)<br/>- 고정 Reference Audio<br/>- Nari Labs Dia TTS"]
+        B["Speaker B (User)<br/>- 다양한 Reference Audio<br/>- XTTS v2 또는 다른 TTS"]
+    end
+    SPK --> SCHED["Timing Scheduler<br/>- 턴 기반 타이밍 계산<br/>- Overlap 구간 삽입<br/>- 자연스러운 간격 추가"]
+    SCHED --> MIX["Stereo Mixer<br/>L Channel: Speaker A (Moshi)<br/>R Channel: Speaker B (User)"]
+    MIX --> ALIGN["WhisperX Alignment<br/>- 각 채널별 word-level timestamp 추출<br/>- JSON 형식 저장"]
 ```
 
 ### 3.3 구현 코드
@@ -688,46 +633,18 @@ class NariDiaWrapper:
 
 가장 실용적인 접근법으로, External TTS로 시작하여 점진적으로 Self-generation으로 전환합니다.
 
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                        Hybrid Approach Pipeline                             │
-├─────────────────────────────────────────────────────────────────────────────┤
-│                                                                             │
-│  Phase 1: Bootstrap (External TTS)                                          │
-│  ──────────────────────────────────                                         │
-│  ┌─────────────────┐   ┌─────────────────┐   ┌─────────────────────────┐   │
-│  │ 한국어 텍스트    │ → │ Nari Labs Dia   │ → │ 초기 학습 데이터        │   │
-│  │ 대화 코퍼스      │   │ + XTTS v2       │   │ (~100시간)              │   │
-│  └─────────────────┘   └─────────────────┘   └─────────────────────────┘   │
-│                                                       │                     │
-│                                                       ▼                     │
-│  Phase 2: Initial Training                                                  │
-│  ─────────────────────────                                                  │
-│  ┌─────────────────────────────────────────────────────────────────────┐   │
-│  │ K-Moshi V4 Training (Full-Duplex Mode)                              │   │
-│  │ - 100시간 External TTS 데이터로 학습                                  │   │
-│  │ - Backbone: Moshi 7B 또는 HFLM 3B                                 │   │
-│  └──────────────────────────────┬──────────────────────────────────────┘   │
-│                                 │                                          │
-│                                 ▼                                          │
-│  Phase 3: Self-Generation (Multi-stream TTS)                               │
-│  ────────────────────────────────────────────                              │
-│  ┌─────────────────────────────────────────────────────────────────────┐   │
-│  │ 학습된 K-Moshi를 TTS로 활용                                          │   │
-│  │ - J-Moshi 방식의 Multi-stream 생성                                   │   │
-│  │ - WER 기반 품질 선택                                                 │   │
-│  │ - 600+ 시간 추가 생성                                                │   │
-│  └──────────────────────────────┬──────────────────────────────────────┘   │
-│                                 │                                          │
-│                                 ▼                                          │
-│  Phase 4: Iterative Improvement                                            │
-│  ──────────────────────────────                                            │
-│  ┌─────────────────────────────────────────────────────────────────────┐   │
-│  │ 생성 데이터 + 실제 데이터 혼합 학습                                    │   │
-│  │ → 품질 향상 → 더 나은 생성 → 반복                                     │   │
-│  └─────────────────────────────────────────────────────────────────────┘   │
-│                                                                             │
-└─────────────────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    subgraph P1["Phase 1: Bootstrap (External TTS)"]
+        direction LR
+        T1["한국어 텍스트 대화 코퍼스"] --> T2["Nari Labs Dia + XTTS v2"] --> T3["초기 학습 데이터 (~100시간)"]
+    end
+    P2["Phase 2: Initial Training<br/>K-Moshi V4 Training (Full-Duplex Mode)<br/>- 100시간 External TTS 데이터로 학습<br/>- Backbone: Moshi 7B 또는 HFLM 3B"]
+    P3["Phase 3: Self-Generation (Multi-stream TTS)<br/>학습된 K-Moshi를 TTS로 활용<br/>- J-Moshi 방식의 Multi-stream 생성<br/>- WER 기반 품질 선택<br/>- 600+ 시간 추가 생성"]
+    P4["Phase 4: Iterative Improvement<br/>생성 데이터 + 실제 데이터 혼합 학습<br/>→ 품질 향상 → 더 나은 생성 → 반복"]
+    P1 --> P2
+    P2 --> P3
+    P3 --> P4
 ```
 
 ### 4.2 Phase별 상세 구현

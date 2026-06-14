@@ -139,29 +139,24 @@ moshi_paths:
 
 ### 4.2 학습 흐름
 
-```
-[한국어 SentencePiece]        [Original Moshi Weights]
-        │                              │
-        ▼                              ▼
-┌──────────────────┐          ┌──────────────────┐
-│   text_emb       │──RANDOM──│   (새 vocab 이므로  │
-│   [32001, 4096]  │   INIT   │    pretrained 무의미)│
-└──────────────────┘          └──────────────────┘
-        │
-        ▼
-┌──────────────────┐          ┌──────────────────┐
-│   Transformer    │◀─LOAD────│  Pretrained      │
-│   32 Layers      │  WEIGHTS │  Transformer     │
-└──────────────────┘          └──────────────────┘
-        │
-        ▼
-┌──────────────────┐
-│   text_linear    │──RANDOM── Output head 재학습
-│   [4096, 32000]  │   INIT
-└──────────────────┘
+```mermaid
+flowchart TD
+    KSP["한국어 SentencePiece"]
+    OMW["Original Moshi Weights"]
+    TextEmb["text_emb<br/>[32001, 4096]"]
+    NewVocab["(새 vocab 이므로 pretrained 무의미)"]
+    Transformer["Transformer<br/>32 Layers"]
+    Pretrained["Pretrained Transformer"]
+    TextLinear["text_linear<br/>[4096, 32000]"]
+    OutputHead["Output head 재학습"]
 
-⚠️ 핵심: text_emb와 text_linear는 vocab이 다르므로 랜덤 초기화됨
-⚠️ Transformer 본체(7B)는 pretrained weights 로드 후 finetuning
+    KSP --> TextEmb
+    OMW --> NewVocab
+    TextEmb -- "RANDOM INIT" --- NewVocab
+    TextEmb --> Transformer
+    Pretrained -- "LOAD WEIGHTS" --> Transformer
+    Transformer --> TextLinear
+    TextLinear -- "RANDOM INIT" --- OutputHead
 ```
 
 ---

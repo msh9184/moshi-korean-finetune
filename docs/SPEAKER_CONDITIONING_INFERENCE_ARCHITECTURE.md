@@ -24,29 +24,18 @@
 
 ### 2.1 Training Phase (Current Implementation)
 
-```
-┌─────────────────────────────────────────────────────────────────────────┐
-│                     TRAINING PIPELINE (Current)                         │
-├─────────────────────────────────────────────────────────────────────────┤
-│                                                                         │
-│  ┌──────────────────┐    ┌──────────────────┐    ┌─────────────────┐   │
-│  │  Full Audio File │───▶│  Random Sampling │───▶│  Reference      │   │
-│  │  (dialogue.wav)  │    │  (train mode)    │    │  Audio/Text     │   │
-│  └──────────────────┘    └──────────────────┘    └────────┬────────┘   │
-│                                                           │            │
-│                                                           ▼            │
-│  ┌──────────────────┐    ┌──────────────────┐    ┌─────────────────┐   │
-│  │  Speaker Encoder │◀───│  16kHz Resample  │◀───│  Reference      │   │
-│  │  (W2v-BERT 2.0)  │    │                  │    │  3-10 sec       │   │
-│  └────────┬─────────┘    └──────────────────┘    └─────────────────┘   │
-│           │                                                            │
-│           ▼                                                            │
-│  ┌──────────────────┐    ┌──────────────────┐    ┌─────────────────┐   │
-│  │  Speaker         │───▶│  sum_condition   │───▶│  LMModel        │   │
-│  │  Conditioner     │    │  [B, 1, 4096]    │    │  Forward        │   │
-│  └──────────────────┘    └──────────────────┘    └─────────────────┘   │
-│                                                                         │
-└─────────────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    subgraph TP["TRAINING PIPELINE (Current)"]
+        A["Full Audio File<br/>(dialogue.wav)"] --> B["Random Sampling<br/>(train mode)"]
+        B --> C["Reference<br/>Audio/Text"]
+        C --> D["Reference<br/>3-10 sec"]
+        D --> E["16kHz Resample"]
+        E --> F["Speaker Encoder<br/>(W2v-BERT 2.0)"]
+        F --> G["Speaker<br/>Conditioner"]
+        G --> H["sum_condition<br/>[B, 1, 4096]"]
+        H --> I["LMModel<br/>Forward"]
+    end
 ```
 
 ### 2.2 Key Files & Current Sampling Logic
@@ -483,55 +472,19 @@ def save_samples(
 
 ### 6.1 Reference Audio Upload Flow
 
-```
-┌─────────────────────────────────────────────────────────────────────────┐
-│                    WEB FRONTEND REFERENCE UPLOAD FLOW                   │
-├─────────────────────────────────────────────────────────────────────────┤
-│                                                                         │
-│  ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐     │
-│  │  User Browser   │    │  K-Moshi        │    │  Rust Backend   │     │
-│  │                 │    │  Frontend       │    │                 │     │
-│  └────────┬────────┘    └────────┬────────┘    └────────┬────────┘     │
-│           │                      │                      │              │
-│           │  1. Select file      │                      │              │
-│           │  (drag & drop or     │                      │              │
-│           │   file picker)       │                      │              │
-│           │─────────────────────▶│                      │              │
-│           │                      │                      │              │
-│           │                      │  2. Read file as     │              │
-│           │                      │     ArrayBuffer      │              │
-│           │                      │  3. Convert to       │              │
-│           │                      │     Base64           │              │
-│           │                      │                      │              │
-│           │                      │  4. WebSocket send   │              │
-│           │                      │  { type: 7,          │              │
-│           │                      │    audio_base64: ... │              │
-│           │                      │    reference_text:.. │              │
-│           │                      │  }                   │              │
-│           │                      │─────────────────────▶│              │
-│           │                      │                      │              │
-│           │                      │                      │  5. Decode   │
-│           │                      │                      │     Base64   │
-│           │                      │                      │  6. Resample │
-│           │                      │                      │     to 16kHz │
-│           │                      │                      │  7. Extract  │
-│           │                      │                      │     embedding│
-│           │                      │                      │  8. Cache    │
-│           │                      │                      │     condition│
-│           │                      │                      │              │
-│           │                      │  9. Ack message      │              │
-│           │                      │◀─────────────────────│              │
-│           │                      │                      │              │
-│           │  10. "Voice ready"   │                      │              │
-│           │◀─────────────────────│                      │              │
-│           │                      │                      │              │
-│           │  11. Start speaking  │                      │              │
-│           │─────────────────────▶│                      │              │
-│           │                      │  12. Audio stream    │              │
-│           │                      │      + condition     │              │
-│           │                      │─────────────────────▶│              │
-│                                                                         │
-└─────────────────────────────────────────────────────────────────────────┘
+```mermaid
+sequenceDiagram
+    participant U as User Browser
+    participant F as K-Moshi Frontend
+    participant B as Rust Backend
+    U->>F: 1. Select file (drag and drop or file picker)
+    Note over F: 2. Read file as ArrayBuffer<br/>3. Convert to Base64
+    F->>B: 4. WebSocket send { type: 7, audio_base64: ..., reference_text: .. }
+    Note over B: 5. Decode Base64<br/>6. Resample to 16kHz<br/>7. Extract embedding<br/>8. Cache condition
+    B->>F: 9. Ack message
+    F->>U: 10. "Voice ready"
+    U->>F: 11. Start speaking
+    F->>B: 12. Audio stream + condition
 ```
 
 ### 6.2 Frontend Code Example (TypeScript)

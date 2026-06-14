@@ -34,19 +34,17 @@ Moshi represents a conversation as two parallel audio streams plus an inner "mon
 
 ## Architecture (pluggable backbone)
 
-```
-            +------------------------- LMModelWrapper -------------------------+
-            |                                                                  |
-  text/audio|   +----------------- AbstractBackbone ------------------+        |
-  tokens  --+-->|  MoshiBackbone (4096)   |   HFLMBackbone (e.g. 3072) |       |
-            |   +----------------------------------+-------------------+       |
-            |                                      | DimensionAdapter (<->4096)|
-            |                                      v                           |
-            |                  shared Moshi temporal transformer + depformer   |
-            |                                      |                           |
-            +--------------------------------------+---------------------------+
-                                                   v
-                                    Mimi codec (audio tokens, full-duplex)
+```mermaid
+flowchart TD
+    IN["text / audio tokens"] --> BB
+    subgraph BB["AbstractBackbone"]
+      direction LR
+      M["MoshiBackbone (4096)"]
+      H["HFLMBackbone (e.g. 3072)"]
+    end
+    BB --> DA["DimensionAdapter (bridges to 4096)"]
+    DA --> SH["Shared Moshi temporal transformer + depformer"]
+    SH --> MIMI["Mimi codec<br/>(audio tokens, full-duplex)"]
 ```
 
 ## Repository layout

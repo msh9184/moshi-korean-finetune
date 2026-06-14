@@ -70,33 +70,30 @@
 
 K-Moshi의 목표는 **Voice Agent** 즉, 음성 기반 대화형 AI입니다. 이에 적합한 코퍼스 특성:
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                    VOICE AGENT CORPUS REQUIREMENTS              │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                 │
-│  1. 대화 구조 (Dialogue Structure)                               │
-│     ├─ 2인 대화 필수 (A ↔ B)                                     │
-│     ├─ 턴테이킹 명확                                             │
-│     └─ 적절한 턴 길이 (1-30초)                                   │
-│                                                                 │
-│  2. 화자 역할 (Speaker Roles)                                    │
-│     ├─ AI/Assistant 역할 식별 가능                               │
-│     ├─ User/Human 역할 식별 가능                                 │
-│     └─ 일관된 화자 성격                                          │
-│                                                                 │
-│  3. 언어 스타일 (Language Style)                                 │
-│     ├─ 구어체 (Spoken Style)                                     │
-│     ├─ 자연스러운 필러 ("음", "그", "아")                        │
-│     └─ 적절한 존댓말/반말 혼용                                   │
-│                                                                 │
-│  4. 도메인 다양성 (Domain Coverage)                              │
-│     ├─ 일상 대화 (Chit-chat)                                     │
-│     ├─ 정보 요청 (Information Seeking)                           │
-│     ├─ 태스크 수행 (Task-oriented)                               │
-│     └─ 감정적 지원 (Emotional Support)                           │
-│                                                                 │
-└─────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    ROOT["VOICE AGENT CORPUS REQUIREMENTS"]
+
+    ROOT --> D1["1. 대화 구조 (Dialogue Structure)"]
+    D1 --> D1a["2인 대화 필수 (A 양방향 B)"]
+    D1 --> D1b["턴테이킹 명확"]
+    D1 --> D1c["적절한 턴 길이 (1-30초)"]
+
+    ROOT --> D2["2. 화자 역할 (Speaker Roles)"]
+    D2 --> D2a["AI/Assistant 역할 식별 가능"]
+    D2 --> D2b["User/Human 역할 식별 가능"]
+    D2 --> D2c["일관된 화자 성격"]
+
+    ROOT --> D3["3. 언어 스타일 (Language Style)"]
+    D3 --> D3a["구어체 (Spoken Style)"]
+    D3 --> D3b["자연스러운 필러 (음, 그, 아)"]
+    D3 --> D3c["적절한 존댓말/반말 혼용"]
+
+    ROOT --> D4["4. 도메인 다양성 (Domain Coverage)"]
+    D4 --> D4a["일상 대화 (Chit-chat)"]
+    D4 --> D4b["정보 요청 (Information Seeking)"]
+    D4 --> D4c["태스크 수행 (Task-oriented)"]
+    D4 --> D4d["감정적 지원 (Emotional Support)"]
 ```
 
 ### 1.3 추천 코퍼스 조합 (Offline-First)
@@ -144,34 +141,28 @@ manual_download_corpus:
 
 ### 1.4 코퍼스 처리 파이프라인 (Offline)
 
-```
-┌──────────────────────────────────────────────────────────────┐
-│                 OFFLINE CORPUS PIPELINE                       │
-├──────────────────────────────────────────────────────────────┤
-│                                                              │
-│  [로컬 PC]                     [GPU 서버]                     │
-│                                                              │
-│  ┌─────────────┐              ┌─────────────┐                │
-│  │ AI Hub      │   SCP/rsync  │ Raw Corpus  │                │
-│  │ Download    │─────────────▶│ /data/raw/  │                │
-│  └─────────────┘              └──────┬──────┘                │
-│                                      │                       │
-│  ┌─────────────┐              ┌──────▼──────┐                │
-│  │ 모두의말뭉치  │   SCP/rsync  │ Parser      │                │
-│  │ Download    │─────────────▶│ (JSON→JSONL)│                │
-│  └─────────────┘              └──────┬──────┘                │
-│                                      │                       │
-│  ┌─────────────┐              ┌──────▼──────┐                │
-│  │ LLM 변환    │   Pre-process │ Spoken     │                │
-│  │ (선택적)    │───on local───▶│ Conversion │                │
-│  └─────────────┘              └──────┬──────┘                │
-│                                      │                       │
-│                               ┌──────▼──────┐                │
-│                               │ Final JSONL │                │
-│                               │ /data/proc/ │                │
-│                               └─────────────┘                │
-│                                                              │
-└──────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    subgraph LOCAL["로컬 PC"]
+        AIH["AI Hub<br/>Download"]
+        NIKL["모두의말뭉치<br/>Download"]
+        LLM["LLM 변환<br/>(선택적)"]
+    end
+
+    subgraph GPU["GPU 서버"]
+        RAW["Raw Corpus<br/>/data/raw/"]
+        PARSER["Parser<br/>(JSON to JSONL)"]
+        SPOKEN["Spoken<br/>Conversion"]
+        FINAL["Final JSONL<br/>/data/proc/"]
+    end
+
+    AIH -->|"SCP/rsync"| RAW
+    NIKL -->|"SCP/rsync"| PARSER
+    LLM -->|"Pre-process on local"| SPOKEN
+
+    RAW --> PARSER
+    PARSER --> SPOKEN
+    SPOKEN --> FINAL
 ```
 
 ---
@@ -427,32 +418,29 @@ tts_strategy:
 
 K-Moshi의 정체성을 정의하는 핵심 요소 중 하나가 **일관된 음성**입니다.
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                K-MOSHI VOICE CHARACTERISTICS                     │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                 │
-│  1. 성별 (Gender)                                                │
-│     └─ 중성적 또는 약간 여성적 (Original Moshi 참조)               │
-│                                                                 │
-│  2. 연령대 (Age)                                                 │
-│     └─ 20-30대 청년 (신뢰감 + 친근함 균형)                        │
-│                                                                 │
-│  3. 톤 (Tone)                                                    │
-│     ├─ 따뜻하고 전문적 (Warm Professional)                       │
-│     ├─ 지나치게 기계적이지 않음                                   │
-│     └─ 과도하게 감정적이지 않음                                   │
-│                                                                 │
-│  4. 발화 속도 (Speaking Rate)                                    │
-│     └─ 중간~약간 빠름 (자연스러운 대화 속도)                      │
-│                                                                 │
-│  5. 명료도 (Clarity)                                             │
-│     └─ 높은 발음 정확도 (Voice Agent 특성)                       │
-│                                                                 │
-│  6. 억양 (Intonation)                                            │
-│     └─ 표준어 (서울말) 기반, 자연스러운 억양 변화                 │
-│                                                                 │
-└─────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    ROOT["K-MOSHI VOICE CHARACTERISTICS"]
+
+    ROOT --> C1["1. 성별 (Gender)"]
+    C1 --> C1a["중성적 또는 약간 여성적 (Original Moshi 참조)"]
+
+    ROOT --> C2["2. 연령대 (Age)"]
+    C2 --> C2a["20-30대 청년 (신뢰감 + 친근함 균형)"]
+
+    ROOT --> C3["3. 톤 (Tone)"]
+    C3 --> C3a["따뜻하고 전문적 (Warm Professional)"]
+    C3 --> C3b["지나치게 기계적이지 않음"]
+    C3 --> C3c["과도하게 감정적이지 않음"]
+
+    ROOT --> C4["4. 발화 속도 (Speaking Rate)"]
+    C4 --> C4a["중간~약간 빠름 (자연스러운 대화 속도)"]
+
+    ROOT --> C5["5. 명료도 (Clarity)"]
+    C5 --> C5a["높은 발음 정확도 (Voice Agent 특성)"]
+
+    ROOT --> C6["6. 억양 (Intonation)"]
+    C6 --> C6a["표준어 (서울말) 기반, 자연스러운 억양 변화"]
 ```
 
 ### 3.2 Reference 음성 확보 방안
@@ -639,24 +627,21 @@ if __name__ == "__main__":
 
 ### 4.1 영어 데이터 혼합의 목적
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│              WHY MIX ENGLISH DATA?                               │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                 │
-│  1. Bilingual Capability (이중 언어 능력)                        │
-│     └─ 영어 질문에도 자연스럽게 응답                              │
-│                                                                 │
-│  2. Code-Switching Support (코드 스위칭)                         │
-│     └─ "이 API 어떻게 써요?" → 영어 기술 용어 포함 응답           │
-│                                                                 │
-│  3. Catastrophic Forgetting Prevention (망각 방지)               │
-│     └─ 원본 Moshi의 영어 능력 유지                               │
-│                                                                 │
-│  4. Robustness (견고성)                                          │
-│     └─ 다양한 입력에 대한 안정성 향상                             │
-│                                                                 │
-└─────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    ROOT["WHY MIX ENGLISH DATA?"]
+
+    ROOT --> R1["1. Bilingual Capability (이중 언어 능력)"]
+    R1 --> R1a["영어 질문에도 자연스럽게 응답"]
+
+    ROOT --> R2["2. Code-Switching Support (코드 스위칭)"]
+    R2 --> R2a["이 API 어떻게 써요? 영어 기술 용어 포함 응답"]
+
+    ROOT --> R3["3. Catastrophic Forgetting Prevention (망각 방지)"]
+    R3 --> R3a["원본 Moshi의 영어 능력 유지"]
+
+    ROOT --> R4["4. Robustness (견고성)"]
+    R4 --> R4a["다양한 입력에 대한 안정성 향상"]
 ```
 
 ### 4.2 영어 데이터 소스 옵션
@@ -1331,78 +1316,35 @@ recommended_strategy:
 
 ### 6.1 전체 워크플로우 다이어그램
 
-```
-┌─────────────────────────────────────────────────────────────────────────┐
-│                    COMPLETE OFFLINE WORKFLOW                            │
-├─────────────────────────────────────────────────────────────────────────┤
-│                                                                         │
-│  ┌─────────────────────────────────────────────────────────────────┐   │
-│  │                    PHASE 1: LOCAL PC PREPARATION                │   │
-│  │                                                                 │   │
-│  │  ┌─────────┐  ┌─────────┐  ┌─────────┐  ┌─────────┐           │   │
-│  │  │ AI Hub  │  │ 모두의   │  │ English │  │ Models  │           │   │
-│  │  │ Download│  │ 말뭉치   │  │ Corpus  │  │ Download│           │   │
-│  │  └────┬────┘  └────┬────┘  └────┬────┘  └────┬────┘           │   │
-│  │       │           │           │           │                   │   │
-│  │       ▼           ▼           ▼           ▼                   │   │
-│  │  ┌─────────────────────────────────────────────────┐          │   │
-│  │  │              LLM Pre-processing                 │          │   │
-│  │  │         (Spoken Style Conversion)               │          │   │
-│  │  └─────────────────────┬───────────────────────────┘          │   │
-│  │                        │                                      │   │
-│  │                        ▼                                      │   │
-│  │  ┌─────────────────────────────────────────────────┐          │   │
-│  │  │           Processed Data Package                │          │   │
-│  │  │  - corpus_processed.jsonl                       │          │   │
-│  │  │  - english_mixed.jsonl                          │          │   │
-│  │  │  - identity_qa.yaml                             │          │   │
-│  │  │  - moshi_reference.wav                          │          │   │
-│  │  │  - user_voices/*.wav                            │          │   │
-│  │  └─────────────────────┬───────────────────────────┘          │   │
-│  └────────────────────────┼────────────────────────────────────────┘   │
-│                           │                                         │
-│                     SCP / rsync                                     │
-│                           │                                         │
-│  ┌────────────────────────▼────────────────────────────────────────┐   │
-│  │                    PHASE 2: GPU SERVER                          │   │
-│  │                                                                 │   │
-│  │  ┌─────────────────────────────────────────────────┐           │   │
-│  │  │  /data/                                         │           │   │
-│  │  │  ├── corpus/                                    │           │   │
-│  │  │  │   ├── korean_processed.jsonl                 │           │   │
-│  │  │  │   └── english_mixed.jsonl                    │           │   │
-│  │  │  ├── voices/                                    │           │   │
-│  │  │  │   ├── moshi_reference.wav                    │           │   │
-│  │  │  │   └── users/*.wav                            │           │   │
-│  │  │  └── identity/                                  │           │   │
-│  │  │      └── identity_qa.yaml                       │           │   │
-│  │  └─────────────────────┬───────────────────────────┘           │   │
-│  │                        │                                        │   │
-│  │                        ▼                                        │   │
-│  │  ┌─────────────────────────────────────────────────┐           │   │
-│  │  │  /models/                                       │           │   │
-│  │  │  ├── openaudio-s1-mini/                         │           │   │
-│  │  │  └── supertonic-2/                              │           │   │
-│  │  └─────────────────────┬───────────────────────────┘           │   │
-│  │                        │                                        │   │
-│  │                        ▼                                        │   │
-│  │  ┌─────────────────────────────────────────────────┐           │   │
-│  │  │           Stage 2 Synthesis Pipeline            │           │   │
-│  │  │                                                 │           │   │
-│  │  │  Corpus → Identity Injection → Timing →        │           │   │
-│  │  │  TTS Synthesis → Quality Check → Output        │           │   │
-│  │  └─────────────────────┬───────────────────────────┘           │   │
-│  │                        │                                        │   │
-│  │                        ▼                                        │   │
-│  │  ┌─────────────────────────────────────────────────┐           │   │
-│  │  │  /output/                                       │           │   │
-│  │  │  ├── audio/*.wav (Stereo, 24kHz)                │           │   │
-│  │  │  ├── alignments/*.json                          │           │   │
-│  │  │  └── manifest.jsonl                             │           │   │
-│  │  └─────────────────────────────────────────────────┘           │   │
-│  └──────────────────────────────────────────────────────────────────┘   │
-│                                                                         │
-└─────────────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    subgraph P1["PHASE 1: LOCAL PC PREPARATION"]
+        AIH["AI Hub<br/>Download"]
+        NIKL["모두의말뭉치"]
+        ENG["English<br/>Corpus"]
+        MOD["Models<br/>Download"]
+        PRE["LLM Pre-processing<br/>(Spoken Style Conversion)"]
+        PKG["Processed Data Package<br/>- corpus_processed.jsonl<br/>- english_mixed.jsonl<br/>- identity_qa.yaml<br/>- moshi_reference.wav<br/>- user_voices/*.wav"]
+
+        AIH --> PRE
+        NIKL --> PRE
+        ENG --> PRE
+        MOD --> PRE
+        PRE --> PKG
+    end
+
+    PKG -->|"SCP / rsync"| DATA
+
+    subgraph P2["PHASE 2: GPU SERVER"]
+        DATA["/data/<br/>corpus/ (korean_processed.jsonl, english_mixed.jsonl)<br/>voices/ (moshi_reference.wav, users/*.wav)<br/>identity/ (identity_qa.yaml)"]
+        MODELS["/models/<br/>openaudio-s1-mini/<br/>supertonic-2/"]
+        PIPE["Stage 2 Synthesis Pipeline<br/>Corpus to Identity Injection to Timing to<br/>TTS Synthesis to Quality Check to Output"]
+        OUT["/output/<br/>audio/*.wav (Stereo, 24kHz)<br/>alignments/*.json<br/>manifest.jsonl"]
+
+        DATA --> MODELS
+        MODELS --> PIPE
+        PIPE --> OUT
+    end
 ```
 
 ### 6.2 단계별 체크리스트

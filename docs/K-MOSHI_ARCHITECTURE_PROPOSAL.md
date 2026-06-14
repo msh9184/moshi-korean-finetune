@@ -20,24 +20,21 @@
 
 ### 1.2 권장 전략: **하이브리드 3-Phase 접근법**
 
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                    K-Moshi 하이브리드 전략                                   │
-├─────────────────────────────────────────────────────────────────────────────┤
-│                                                                             │
-│  Phase 1 (4주)         Phase 2 (4주)         Phase 3 (4주)                 │
-│  ┌───────────────┐    ┌───────────────┐    ┌───────────────┐               │
-│  │ PersonaPlex   │    │ F-actor       │    │ 최적화        │               │
-│  │ 스타일        │───▶│ 스타일        │───▶│ (선택)        │               │
-│  │               │    │               │    │               │               │
-│  │ • Voice.pt    │    │ • ECAPA-TDNN  │    │ • FSQ 검토    │               │
-│  │ • 기본 학습   │    │ • Instruction │    │ • MCTP 검토   │               │
-│  │ • 한국어 검증 │    │ • 행동 제어   │    │ • 속도 최적화 │               │
-│  └───────────────┘    └───────────────┘    └───────────────┘               │
-│                                                                             │
-│  목표: 빠른 검증       목표: 확장성 확보     목표: 성능 최적화               │
-│                                                                             │
-└─────────────────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart LR
+  subgraph P1["Phase 1 (4주)"]
+    A1["PersonaPlex 스타일<br/>• Voice.pt<br/>• 기본 학습<br/>• 한국어 검증"]
+  end
+  subgraph P2["Phase 2 (4주)"]
+    A2["F-actor 스타일<br/>• ECAPA-TDNN<br/>• Instruction<br/>• 행동 제어"]
+  end
+  subgraph P3["Phase 3 (4주)"]
+    A3["최적화 (선택)<br/>• FSQ 검토<br/>• MCTP 검토<br/>• 속도 최적화"]
+  end
+  A1 --> A2 --> A3
+  P1 -.->|"목표: 빠른 검증"| P1
+  P2 -.->|"목표: 확장성 확보"| P2
+  P3 -.->|"목표: 성능 최적화"| P3
 ```
 
 ---
@@ -53,44 +50,12 @@
 
 #### 2.1.2 아키텍처
 
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                       K-Moshi Phase 1 Architecture                          │
-├─────────────────────────────────────────────────────────────────────────────┤
-│                                                                             │
-│  ┌─────────────────────────────────────────────────────────────────────┐    │
-│  │                    Voice Prompt (Pre-computed)                       │    │
-│  │                                                                     │    │
-│  │  KMOSHI_V1.pt  ───────────────────────────────────────────────────▶ │    │
-│  │                                                                     │    │
-│  │  • 한국어 참조 음성 (20-30초)                                       │    │
-│  │  • Mimi encode → audio token cache                                 │    │
-│  │  • load_voice_prompt() → state.cache 설정                          │    │
-│  └─────────────────────────────────────────────────────────────────────┘    │
-│                              │                                              │
-│                              ▼                                              │
-│  ┌─────────────────────────────────────────────────────────────────────┐    │
-│  │                    Text Prompt (Runtime)                             │    │
-│  │                                                                     │    │
-│  │  "당신은 케이모시입니다. 한국어 AI 비서입니다.  │    │
-│  │   친절하고 따뜻한 말투를 사용합니다. 사용자의 질문에 도움이 되는       │    │
-│  │   답변을 제공합니다."                                                │    │
-│  │                                                                     │    │
-│  │  • SentencePiece tokenization                                       │    │
-│  │  • Text embedding → model input                                    │    │
-│  └─────────────────────────────────────────────────────────────────────┘    │
-│                              │                                              │
-│                              ▼                                              │
-│  ┌─────────────────────────────────────────────────────────────────────┐    │
-│  │                         Moshi 7B                                    │    │
-│  │                                                                     │    │
-│  │  • Transformer backbone (32 layers)                                │    │
-│  │  • LoRA fine-tuning (rank=128)                                     │    │
-│  │  • Depformer for audio generation                                  │    │
-│  │  • 기존 Mimi codec 사용                                             │    │
-│  └─────────────────────────────────────────────────────────────────────┘    │
-│                                                                             │
-└─────────────────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+  VP["Voice Prompt (Pre-computed)<br/>KMOSHI_V1.pt<br/>• 한국어 참조 음성 (20-30초)<br/>• Mimi encode 에서 audio token cache<br/>• load_voice_prompt() 에서 state.cache 설정"]
+  TP["Text Prompt (Runtime)<br/>당신은 케이모시입니다. 한국어 AI 비서입니다.<br/>친절하고 따뜻한 말투를 사용합니다.<br/>사용자의 질문에 도움이 되는 답변을 제공합니다.<br/>• SentencePiece tokenization<br/>• Text embedding 에서 model input"]
+  M7["Moshi 7B<br/>• Transformer backbone (32 layers)<br/>• LoRA fine-tuning (rank=128)<br/>• Depformer for audio generation<br/>• 기존 Mimi codec 사용"]
+  VP --> TP --> M7
 ```
 
 #### 2.1.3 구현 체크리스트
@@ -131,61 +96,17 @@ phase_1_implementation:
 
 #### 2.2.2 아키텍처
 
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                       K-Moshi Phase 2 Architecture                          │
-├─────────────────────────────────────────────────────────────────────────────┤
-│                                                                             │
-│  ┌─────────────────────────────────────────────────────────────────────┐    │
-│  │                   Speaker Embedding Module                           │    │
-│  │                                                                     │    │
-│  │  Reference Audio (5초)                                              │    │
-│  │        │                                                            │    │
-│  │        ▼                                                            │    │
-│  │  ┌─────────────────────────────────────────────────────────────┐   │    │
-│  │  │              ECAPA-TDNN (pretrained)                        │   │    │
-│  │  │              • 한국어 화자 인식 모델                         │   │    │
-│  │  │              • Output: 192-dim speaker vector               │   │    │
-│  │  └─────────────────────────────────────────────────────────────┘   │    │
-│  │        │                                                            │    │
-│  │        ▼                                                            │    │
-│  │  ┌─────────────────────────────────────────────────────────────┐   │    │
-│  │  │         Speaker Projection Layer (trainable)                │   │    │
-│  │  │         • Linear(192, 4096)                                 │   │    │
-│  │  │         • Output: LLM token space embedding                 │   │    │
-│  │  └─────────────────────────────────────────────────────────────┘   │    │
-│  └─────────────────────────────────────────────────────────────────────┘    │
-│                              │                                              │
-│                              ▼                                              │
-│  ┌─────────────────────────────────────────────────────────────────────┐    │
-│  │                   Instruction Prefix                                 │    │
-│  │                                                                     │    │
-│  │  [Speaker_Emb] + [Instruction_Tokens]                               │    │
-│  │                                                                     │    │
-│  │  "conversation_narrative: 고객 서비스 상담                          │    │
-│  │   initiation: system                                                │    │
-│  │   backchannel_frequency: high                                       │    │
-│  │   interruption_allowed: false                                       │    │
-│  │   tone: friendly_professional"                                      │    │
-│  │                                                                     │    │
-│  │  → Concatenated and fed to LLM                                     │    │
-│  └─────────────────────────────────────────────────────────────────────┘    │
-│                              │                                              │
-│                              ▼                                              │
-│  ┌─────────────────────────────────────────────────────────────────────┐    │
-│  │                    Modified Moshi 7B                                 │    │
-│  │                                                                     │    │
-│  │  Input Processing:                                                  │    │
-│  │    original_input + speaker_emb + instruction_tokens                │    │
-│  │                                                                     │    │
-│  │  Training:                                                          │    │
-│  │    • ECAPA-TDNN: Frozen                                             │    │
-│  │    • Projection Layer: Trainable                                    │    │
-│  │    • LLM Backbone: LoRA fine-tuning                                 │    │
-│  │    • Depformer: Fine-tuning                                         │    │
-│  └─────────────────────────────────────────────────────────────────────┘    │
-│                                                                             │
-└─────────────────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+  subgraph SE["Speaker Embedding Module"]
+    RA["Reference Audio (5초)"]
+    EC["ECAPA-TDNN (pretrained)<br/>• 한국어 화자 인식 모델<br/>• Output: 192-dim speaker vector"]
+    SP["Speaker Projection Layer (trainable)<br/>• Linear(192, 4096)<br/>• Output: LLM token space embedding"]
+    RA --> EC --> SP
+  end
+  IP["Instruction Prefix<br/>[Speaker_Emb] + [Instruction_Tokens]<br/>conversation_narrative: 고객 서비스 상담<br/>initiation: system<br/>backchannel_frequency: high<br/>interruption_allowed: false<br/>tone: friendly_professional<br/>에서 Concatenated and fed to LLM"]
+  MM["Modified Moshi 7B<br/>Input Processing:<br/>original_input + speaker_emb + instruction_tokens<br/>Training:<br/>• ECAPA-TDNN: Frozen<br/>• Projection Layer: Trainable<br/>• LLM Backbone: LoRA fine-tuning<br/>• Depformer: Fine-tuning"]
+  SE --> IP --> MM
 ```
 
 #### 2.2.3 Instruction-Following 데이터 형식
@@ -258,57 +179,22 @@ phase_2_implementation:
 
 #### 2.3.1 Option A: FSQ 전환
 
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                    FSQ Optimization (F-actor 참고)                          │
-├─────────────────────────────────────────────────────────────────────────────┤
-│                                                                             │
-│  현재 (RVQ + Depformer):                                                    │
-│  ┌─────────────────────────────────────────────────────────────────────┐    │
-│  │  Audio Token → Depformer → 순차적 8단계 예측                        │    │
-│  │  장점: 높은 품질                                                    │    │
-│  │  단점: 느린 추론 속도                                               │    │
-│  └─────────────────────────────────────────────────────────────────────┘    │
-│                                                                             │
-│  변경 후 (FSQ + Parallel Heads):                                            │
-│  ┌─────────────────────────────────────────────────────────────────────┐    │
-│  │  Audio Token → 4개 Linear Head → 병렬 예측                          │    │
-│  │  장점: 빠른 추론 (1단계)                                            │    │
-│  │  단점: 품질 약간 저하 가능, 아키텍처 수정 필요                      │    │
-│  └─────────────────────────────────────────────────────────────────────┘    │
-│                                                                             │
-│  구현 난이도: ★★★★☆ (높음)                                              │
-│  예상 효과: 추론 속도 3-4x 향상                                            │
-│                                                                             │
-└─────────────────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+  CUR["현재 (RVQ + Depformer)<br/>Audio Token 에서 Depformer 에서 순차적 8단계 예측<br/>장점: 높은 품질<br/>단점: 느린 추론 속도"]
+  NEW["변경 후 (FSQ + Parallel Heads)<br/>Audio Token 에서 4개 Linear Head 에서 병렬 예측<br/>장점: 빠른 추론 (1단계)<br/>단점: 품질 약간 저하 가능, 아키텍처 수정 필요"]
+  NOTE["구현 난이도: 별 4개 (높음)<br/>예상 효과: 추론 속도 3-4x 향상"]
+  CUR --> NEW --> NOTE
 ```
 
 #### 2.3.2 Option B: MCTP 적용 (VITA-Audio 참고)
 
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│              Multiple Cross-modal Token Prediction (MCTP)                   │
-├─────────────────────────────────────────────────────────────────────────────┤
-│                                                                             │
-│  기존:                                                                      │
-│  ┌─────────────────────────────────────────────────────────────────────┐    │
-│  │  Forward Pass → 1개 audio token 생성 → 반복                         │    │
-│  └─────────────────────────────────────────────────────────────────────┘    │
-│                                                                             │
-│  MCTP 적용 후:                                                              │
-│  ┌─────────────────────────────────────────────────────────────────────┐    │
-│  │  Forward Pass → N개 audio token 동시 생성 (N=4~8)                   │    │
-│  │                                                                     │    │
-│  │  Implementation:                                                    │    │
-│  │  • N개의 prediction head 추가                                       │    │
-│  │  • Attention mask 조정 (미래 토큰 참조 방지)                        │    │
-│  │  • Progressive training (1→2→4→8)                                  │    │
-│  └─────────────────────────────────────────────────────────────────────┘    │
-│                                                                             │
-│  구현 난이도: ★★★☆☆ (중간)                                              │
-│  예상 효과: First-token latency 3-5x 감소 (236ms → ~50ms)                  │
-│                                                                             │
-└─────────────────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+  OLD["기존<br/>Forward Pass 에서 1개 audio token 생성 에서 반복"]
+  AFT["MCTP 적용 후<br/>Forward Pass 에서 N개 audio token 동시 생성 (N=4~8)<br/>Implementation:<br/>• N개의 prediction head 추가<br/>• Attention mask 조정 (미래 토큰 참조 방지)<br/>• Progressive training (1 에서 2 에서 4 에서 8)"]
+  NOTE["구현 난이도: 별 3개 (중간)<br/>예상 효과: First-token latency 3-5x 감소 (236ms 에서 약 50ms)"]
+  OLD --> AFT --> NOTE
 ```
 
 ---
@@ -356,41 +242,12 @@ phase_2_data:
 
 ### 3.2 Back-annotation 파이프라인
 
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                      Back-annotation Pipeline                               │
-├─────────────────────────────────────────────────────────────────────────────┤
-│                                                                             │
-│  Step 1: 기존 대화 데이터                                                   │
-│  ┌─────────────────────────────────────────────────────────────────────┐    │
-│  │  dialogue_001.wav + alignments                                      │    │
-│  │  (instruction 없음)                                                 │    │
-│  └─────────────────────────────────────────────────────────────────────┘    │
-│                              │                                              │
-│                              ▼                                              │
-│  Step 2: 대화 분석 (Local LLM)                                              │
-│  ┌─────────────────────────────────────────────────────────────────────┐    │
-│  │  Input: Full transcript + timing information                        │    │
-│  │                                                                     │    │
-│  │  Local LLM 프롬프트:                                                 │    │
-│  │  "다음 대화를 분석하고 instruction을 생성하세요:                     │    │
-│  │   1. 대화 시나리오 요약 (narrative)                                 │    │
-│  │   2. 누가 먼저 말했는지 (initiation)                                 │    │
-│  │   3. 맞장구 빈도 추정 (backchannel)                                 │    │
-│  │   4. 끼어들기 빈도 추정 (interruption)                              │    │
-│  │   5. 전반적인 톤 (tone)"                                            │    │
-│  │                                                                     │    │
-│  │  Output: Structured instruction                                     │    │
-│  └─────────────────────────────────────────────────────────────────────┘    │
-│                              │                                              │
-│                              ▼                                              │
-│  Step 3: Instruction 통합                                                   │
-│  ┌─────────────────────────────────────────────────────────────────────┐    │
-│  │  dialogue_001.wav + alignments + instruction                        │    │
-│  │  → Phase 2 학습 데이터                                              │    │
-│  └─────────────────────────────────────────────────────────────────────┘    │
-│                                                                             │
-└─────────────────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+  S1["Step 1: 기존 대화 데이터<br/>dialogue_001.wav + alignments<br/>(instruction 없음)"]
+  S2["Step 2: 대화 분석 (Local LLM)<br/>Input: Full transcript + timing information<br/>Local LLM 프롬프트:<br/>다음 대화를 분석하고 instruction을 생성하세요:<br/>1. 대화 시나리오 요약 (narrative)<br/>2. 누가 먼저 말했는지 (initiation)<br/>3. 맞장구 빈도 추정 (backchannel)<br/>4. 끼어들기 빈도 추정 (interruption)<br/>5. 전반적인 톤 (tone)<br/>Output: Structured instruction"]
+  S3["Step 3: Instruction 통합<br/>dialogue_001.wav + alignments + instruction<br/>에서 Phase 2 학습 데이터"]
+  S1 --> S2 --> S3
 ```
 
 ---

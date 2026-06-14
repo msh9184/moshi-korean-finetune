@@ -17,71 +17,42 @@
 
 ## 2. Moshi 아키텍처 전체 구조
 
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                         MOSHI DUAL-TRANSFORMER ARCHITECTURE                  │
-├─────────────────────────────────────────────────────────────────────────────┤
-│                                                                             │
-│  INPUT (timestep t):                                                        │
-│  ┌─────────────────────────────────────────────────────────────────────┐   │
-│  │  codes[B, 9, T] = [text_tokens, audio_cb0, audio_cb1, ..., audio_cb7]│   │
-│  │                    ↑ MOSHI text   ↑ USER audio (8 Mimi codebooks)    │   │
-│  └─────────────────────────────────────────────────────────────────────┘   │
-│                                    │                                        │
-│                                    ▼                                        │
-│  ┌─────────────────────────────────────────────────────────────────────┐   │
-│  │              TEMPORAL TRANSFORMER (7B params, ~32 layers)            │   │
-│  │  ┌───────────────────────────────────────────────────────────────┐  │   │
-│  │  │  input_ = text_emb(codes[:,0])                                 │  │   │
-│  │  │         + Σ audio_emb[i](codes[:,i+1]) for i in 0..7          │  │   │
-│  │  │         + sum_condition  ← SPEAKER CONDITIONING HERE          │  │   │
-│  │  └───────────────────────────────────────────────────────────────┘  │   │
-│  │                              │                                       │   │
-│  │                              ▼                                       │   │
-│  │  ┌───────────────────────────────────────────────────────────────┐  │   │
-│  │  │  transformer_out = self.transformer(input_)                    │  │   │
-│  │  │  Shape: [B, T, dim=4096]                                       │  │   │
-│  │  └───────────────────────────────────────────────────────────────┘  │   │
-│  │                              │                                       │   │
-│  │                              ├──────────────────┐                    │   │
-│  │                              ▼                  ▼                    │   │
-│  │  ┌──────────────────────┐   ┌──────────────────────────────────┐   │   │
-│  │  │ text_logits =        │   │ depformer_in[k](transformer_out) │   │   │
-│  │  │ text_linear(out_norm)│   │ Projects to depformer_dim=1024   │   │   │
-│  │  │ → MOSHI TEXT OUTPUT  │   └──────────────────────────────────┘   │   │
-│  │  └──────────────────────┘                   │                       │   │
-│  └─────────────────────────────────────────────│───────────────────────┘   │
-│                                                │                            │
-│                                                ▼                            │
-│  ┌─────────────────────────────────────────────────────────────────────┐   │
-│  │              DEPTH TRANSFORMER (Depformer, ~300M params, 6 layers)   │   │
-│  │                                                                       │   │
-│  │  FOR EACH timestep t in T (independently, batched as B*T):           │   │
-│  │  ┌───────────────────────────────────────────────────────────────┐  │   │
-│  │  │  FOR k = 0 to dep_q-1 (sequentially, 8 codebooks):             │  │   │
-│  │  │    if k == 0:                                                   │  │   │
-│  │  │      token_in = depformer_text_emb(text_token[t])              │  │   │
-│  │  │    else:                                                        │  │   │
-│  │  │      token_in = depformer_emb[k-1](audio_token[k-1, t])        │  │   │
-│  │  │                                                                 │  │   │
-│  │  │    depformer_input = depformer_in[k](transformer_out[t])       │  │   │
-│  │  │                    + token_in                                   │  │   │
-│  │  │                                                                 │  │   │
-│  │  │    ┌─ NO SPEAKER CONDITION INJECTION POINT ─┐                  │  │   │
-│  │  │    │  dep_output = depformer(depformer_input)                  │  │   │
-│  │  │    │  audio_logits[k] = linear[k](norm[k](dep_output))         │  │   │
-│  │  │    └────────────────────────────────────────┘                  │  │   │
-│  │  │                                                                 │  │   │
-│  │  │    audio_token[k, t] = sample(audio_logits[k])  ← OUTPUT       │  │   │
-│  │  └───────────────────────────────────────────────────────────────┘  │   │
-│  └─────────────────────────────────────────────────────────────────────┘   │
-│                                                                             │
-│  OUTPUT:                                                                    │
-│  ┌─────────────────────────────────────────────────────────────────────┐   │
-│  │  text_logits[B, 1, T, text_card]  → MOSHI가 말하는 텍스트            │   │
-│  │  audio_logits[B, 8, T, card]      → MOSHI 음성 (8 Mimi codebooks)   │   │
-│  └─────────────────────────────────────────────────────────────────────┘   │
-└─────────────────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    IN["INPUT (timestep t): codes[B, 9, T] = [text_tokens, audio_cb0, audio_cb1, ..., audio_cb7] (text_tokens: MOSHI text / audio_cb0..7: USER audio, 8 Mimi codebooks)"]
+
+    subgraph TEMP["TEMPORAL TRANSFORMER (7B params, ~32 layers)"]
+        T1["input_ = text_emb(codes[:,0]) + sum of audio_emb[i](codes[:,i+1]) for i in 0..7 + sum_condition  (SPEAKER CONDITIONING HERE)"]
+        T2["transformer_out = self.transformer(input_)  Shape: [B, T, dim=4096]"]
+        T3["text_logits = text_linear(out_norm)  (MOSHI TEXT OUTPUT)"]
+        T4["depformer_in[k](transformer_out)  Projects to depformer_dim=1024"]
+        T1 --> T2
+        T2 --> T3
+        T2 --> T4
+    end
+
+    subgraph DEPTH["DEPTH TRANSFORMER (Depformer, ~300M params, 6 layers)"]
+        D0["FOR EACH timestep t in T (independently, batched as B*T)"]
+        D1["FOR k = 0 to dep_q-1 (sequentially, 8 codebooks)"]
+        D2{"k == 0 ?"}
+        D3["token_in = depformer_text_emb(text_token[t])"]
+        D4["token_in = depformer_emb[k-1](audio_token[k-1, t])"]
+        D5["depformer_input = depformer_in[k](transformer_out[t]) + token_in"]
+        D6["NO SPEAKER CONDITION INJECTION POINT: dep_output = depformer(depformer_input); audio_logits[k] = linear[k](norm[k](dep_output))"]
+        D7["audio_token[k, t] = sample(audio_logits[k])  (OUTPUT)"]
+        D0 --> D1 --> D2
+        D2 -- "yes" --> D3
+        D2 -- "no" --> D4
+        D3 --> D5
+        D4 --> D5
+        D5 --> D6 --> D7
+    end
+
+    OUT["OUTPUT: text_logits[B, 1, T, text_card] (MOSHI가 말하는 텍스트); audio_logits[B, 8, T, card] (MOSHI 음성, 8 Mimi codebooks)"]
+
+    IN --> T1
+    T4 --> D0
+    D7 --> OUT
 ```
 
 ---
@@ -131,12 +102,15 @@ def forward_text(self, sequence, sum_condition=None, cross_attention_src=None):
 
 #### `sum_condition` 주입 시점의 텐서 상태
 
-```
-input_ = text_emb[MOSHI] + Σ audio_emb[USER]
-       ↑                   ↑
-       MOSHI가 말할 텍스트   USER가 말하는 음성
-
-sum_condition → MOSHI 출력 화자의 speaker embedding
+```mermaid
+flowchart TD
+    A["text_emb[MOSHI]  (MOSHI가 말할 텍스트)"]
+    B["sum of audio_emb[USER]  (USER가 말하는 음성)"]
+    C["input_"]
+    S["sum_condition  (MOSHI 출력 화자의 speaker embedding)"]
+    A --> C
+    B --> C
+    S --> C
 ```
 
 ### 3.3 의미론적 올바름 분석
@@ -272,60 +246,28 @@ def forward_depformer(self, depformer_cb_index, sequence, transformer_out):
 
 ### 4.2 Timestep 간 변수 전달 분석
 
-```
-═══════════════════════════════════════════════════════════════════════════════
-                    DEPFORMER EXECUTION FLOW (Timestep S → S+1)
-═══════════════════════════════════════════════════════════════════════════════
+```mermaid
+flowchart TD
+    subgraph TS["TIMESTEP S"]
+        TO["transformer_out[S]  (from Temporal TF)"]
+        PROJ["depformer_in[k]:  k=0 | k=1 | k=2 | k=3 | k=4 | k=5 | k=6 | k=7"]
+        PREV["Previous token:  text_token[S] (to k=0), audio[0,S] (to k=1), audio[1,S] (to k=2), audio[2,S] (to k=3), audio[3,S] (to k=4), audio[4,S] (to k=5), audio[5,S] (to k=6), audio[6,S] (to k=7)"]
+        DIN["Depformer Input[k] = depformer_in[k](transformer_out[S]) + prev_token[k]"]
+        DEP["DEPFORMER (6 layers): weights_per_step[k] (Codebook별 다른 가중치, 선택적), Self-Attention, Feed Forward"]
+        OUTS["Output: audio_logits[0,S], [1,S], [2,S], [3,S], [4,S], [5,S], [6,S], [7,S] → MOSHI OUTPUT AUDIO TOKENS FOR TIMESTEP S"]
+        TO --> PROJ
+        PROJ --> DIN
+        PREV --> DIN
+        DIN --> DEP --> OUTS
+    end
 
-TIMESTEP S:
-┌────────────────────────────────────────────────────────────────────────────┐
-│  transformer_out[S] ─────┬─────┬─────┬─────┬─────┬─────┬─────┬─────┐      │
-│  (from Temporal TF)      │     │     │     │     │     │     │     │      │
-│                          ▼     ▼     ▼     ▼     ▼     ▼     ▼     ▼      │
-│                    ┌─────┬─────┬─────┬─────┬─────┬─────┬─────┬─────┐      │
-│  depformer_in[k]:  │ k=0 │ k=1 │ k=2 │ k=3 │ k=4 │ k=5 │ k=6 │ k=7 │      │
-│                    └──┬──┴──┬──┴──┬──┴──┬──┴──┬──┴──┬──┴──┬──┴──┬──┘      │
-│                       │     │     │     │     │     │     │     │         │
-│  Previous token:      │     │     │     │     │     │     │     │         │
-│  ┌────────────────────┤     │     │     │     │     │     │     │         │
-│  │ text_token[S]  ────┘     │     │     │     │     │     │     │         │
-│  │ audio[0,S] ──────────────┘     │     │     │     │     │     │         │
-│  │ audio[1,S] ────────────────────┘     │     │     │     │     │         │
-│  │ audio[2,S] ──────────────────────────┘     │     │     │     │         │
-│  │ audio[3,S] ────────────────────────────────┘     │     │     │         │
-│  │ audio[4,S] ──────────────────────────────────────┘     │     │         │
-│  │ audio[5,S] ────────────────────────────────────────────┘     │         │
-│  │ audio[6,S] ──────────────────────────────────────────────────┘         │
-│  └────────────────────────────────────────────────────────────────────────┤
-│                                                                            │
-│  Depformer Input[k] = depformer_in[k](transformer_out[S]) + prev_token[k] │
-│                                                                            │
-│                    ┌─────────────────────────────┐                         │
-│                    │      DEPFORMER (6 layers)    │                         │
-│                    │   ┌───────────────────────┐ │                         │
-│                    │   │  weights_per_step[k]  │ │ ← Codebook별 다른 가중치│
-│                    │   │  Self-Attention       │ │   (선택적)              │
-│                    │   │  Feed Forward         │ │                         │
-│                    │   └───────────────────────┘ │                         │
-│                    └─────────────────────────────┘                         │
-│                                    │                                       │
-│                                    ▼                                       │
-│  Output:   ┌─────────────────────────────────────────────────────────┐    │
-│            │ audio_logits[0,S], [1,S], [2,S], [3,S], [4,S], [5,S],   │    │
-│            │ [6,S], [7,S] → MOSHI OUTPUT AUDIO TOKENS FOR TIMESTEP S │    │
-│            └─────────────────────────────────────────────────────────┘    │
-└────────────────────────────────────────────────────────────────────────────┘
-                                    │
-                                    │ (timestep 경계)
-                                    ▼
-TIMESTEP S+1:
-┌────────────────────────────────────────────────────────────────────────────┐
-│  transformer_out[S+1] ← 새로운 Temporal TF 출력                            │
-│                                                                            │
-│  ★ 핵심: S에서 생성된 audio_logits는 S+1로 직접 전달되지 않음               │
-│         S+1의 입력은 다시 sequence[:, :, S+1]에서 옴 (teacher forcing)     │
-│         또는 inference 시 S에서 샘플링된 토큰이 sequence에 저장됨           │
-└────────────────────────────────────────────────────────────────────────────┘
+    subgraph TS1["TIMESTEP S+1"]
+        N1["transformer_out[S+1] ← 새로운 Temporal TF 출력"]
+        N2["핵심: S에서 생성된 audio_logits는 S+1로 직접 전달되지 않음. S+1의 입력은 다시 sequence[:, :, S+1]에서 옴 (teacher forcing), 또는 inference 시 S에서 샘플링된 토큰이 sequence에 저장됨"]
+        N1 --> N2
+    end
+
+    OUTS -- "timestep 경계" --> N1
 ```
 
 ### 4.3 핵심 발견: Timestep 독립성
@@ -380,22 +322,17 @@ depformer_input = depformer_input + last_token_input
 
 ### 5.1 Option A: Temporal Transformer Only (현재 구조)
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│ Temporal Transformer                                        │
-│   input_ = text_emb + Σaudio_emb + speaker_emb             │
-│                                    ↑                        │
-│                        [Global Speaker Identity]            │
-│                                                             │
-│   → transformer_out (화자 정보가 암묵적으로 인코딩됨)       │
-└─────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
-┌─────────────────────────────────────────────────────────────┐
-│ Depformer                                                   │
-│   depformer_input = project(transformer_out) + prev_token  │
-│   (화자 정보는 transformer_out에 녹아있음, 직접 조건화 없음) │
-└─────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    subgraph TT["Temporal Transformer"]
+        A1["input_ = text_emb + sum of audio_emb + speaker_emb  (speaker_emb: Global Speaker Identity)"]
+        A2["transformer_out (화자 정보가 암묵적으로 인코딩됨)"]
+        A1 --> A2
+    end
+    subgraph DF["Depformer"]
+        B1["depformer_input = project(transformer_out) + prev_token  (화자 정보는 transformer_out에 녹아있음, 직접 조건화 없음)"]
+    end
+    A2 --> B1
 ```
 
 **장점**:
@@ -409,25 +346,15 @@ depformer_input = depformer_input + last_token_input
 
 ### 5.2 Option B: Dual-Level Speaker Conditioning (제안)
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│ Temporal Transformer                                        │
-│   input_ = text_emb + Σaudio_emb + speaker_emb_global      │
-│                                    ↑                        │
-│                        [Global Speaker Identity: 192D]      │
-│                        "누구의 목소리인가"                   │
-└─────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
-┌─────────────────────────────────────────────────────────────┐
-│ Depformer (Modified)                                        │
-│   depformer_input = project(transformer_out)               │
-│                   + prev_token                              │
-│                   + speaker_emb_acoustic  ← NEW!           │
-│                     ↑                                       │
-│         [Acoustic Speaker Features: 1024D]                  │
-│         "이 화자의 음색/prosody 특성"                        │
-└─────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    subgraph TT["Temporal Transformer"]
+        A1["input_ = text_emb + sum of audio_emb + speaker_emb_global  (speaker_emb_global: Global Speaker Identity 192D, '누구의 목소리인가')"]
+    end
+    subgraph DF["Depformer (Modified)"]
+        B1["depformer_input = project(transformer_out) + prev_token + speaker_emb_acoustic  (NEW)  (speaker_emb_acoustic: Acoustic Speaker Features 1024D, '이 화자의 음색/prosody 특성')"]
+    end
+    A1 --> B1
 ```
 
 **구현 방안**:
@@ -456,26 +383,18 @@ def forward_depformer_training(self, sequence, transformer_out,
 
 ### 5.3 Option C: Hierarchical Audio Prompt (Zero-shot 최적)
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│ Speaker Encoder (ECAPA-TDNN)                                │
-│   reference_audio → global_speaker_emb [1, 192]            │
-│   "화자 정체성 요약"                                        │
-└─────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
-┌─────────────────────────────────────────────────────────────┐
-│ Temporal Transformer                                        │
-│   ┌─────────────────────────────────────────────────────┐  │
-│   │ [REF_AUDIO_TOKENS] [SEP] [USER_AUDIO + MOSHI_TEXT]  │  │
-│   │  ↑                        ↑                          │  │
-│   │  Reference audio prompt   Actual dialogue           │  │
-│   │  (Mimi encoded, ~3-5sec)                             │  │
-│   └─────────────────────────────────────────────────────┘  │
-│                                                             │
-│   sum_condition = project(global_speaker_emb)              │
-│   input_ = ... + sum_condition                             │
-└─────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    subgraph SE["Speaker Encoder (ECAPA-TDNN)"]
+        A1["reference_audio → global_speaker_emb [1, 192]  ('화자 정체성 요약')"]
+    end
+    subgraph TT["Temporal Transformer"]
+        B1["[REF_AUDIO_TOKENS] [SEP] [USER_AUDIO + MOSHI_TEXT]  (REF_AUDIO_TOKENS: Reference audio prompt, Mimi encoded ~3-5sec / USER_AUDIO+MOSHI_TEXT: Actual dialogue)"]
+        B2["sum_condition = project(global_speaker_emb)"]
+        B3["input_ = ... + sum_condition"]
+        B1 --> B2 --> B3
+    end
+    A1 --> B1
 ```
 
 **Audio Prompt 역할**:
@@ -586,21 +505,14 @@ def update_speaker(self, new_reference_audio):
 
 ### 8.3 Audio Prompt as System Prompt
 
-```
-Streaming Context:
-┌────────────────────────────────────────────────────────────────┐
-│ [Audio Prompt: 3-5초 reference]                                │
-│      ↓ (fixed, 처음에만 처리)                                  │
-│ [SEP]                                                          │
-│      ↓                                                         │
-│ [Turn 1: USER audio | MOSHI response]                         │
-│ [Turn 2: USER audio | MOSHI response]                         │
-│ ...                                                            │
-└────────────────────────────────────────────────────────────────┘
-
-- Audio prompt은 KV cache에 저장
-- 이후 턴에서 cross-attention으로 참조
-- Memory efficient (prompt 반복 계산 불필요)
+```mermaid
+flowchart TD
+    P["[Audio Prompt: 3-5초 reference]  (fixed, 처음에만 처리)"]
+    SEP["[SEP]"]
+    T1["[Turn 1: USER audio | MOSHI response]"]
+    T2["[Turn 2: USER audio | MOSHI response]"]
+    T3["..."]
+    P --> SEP --> T1 --> T2 --> T3
 ```
 
 ---

@@ -101,37 +101,12 @@ def get_sum(self, conditions: ConditionTensors) -> torch.Tensor | None:
 
 #### 아키텍처 구조
 
-```
-┌──────────────────────────────────────────────────────────────────────┐
-│                    Option A: Speaker Encoder 방식                     │
-├──────────────────────────────────────────────────────────────────────┤
-│                                                                      │
-│   Reference Audio (10-20s)                                           │
-│         │                                                            │
-│         ▼                                                            │
-│   ┌─────────────────┐                                                │
-│   │  ECAPA-TDNN     │  ← Pre-trained (Frozen or Fine-tuned)         │
-│   │  Speaker Encoder│                                                │
-│   └────────┬────────┘                                                │
-│            │ [B, 192/256]                                            │
-│            ▼                                                         │
-│   ┌─────────────────┐                                                │
-│   │ Projection Layer│  ← 학습 필요 (Linear 192→4096)                 │
-│   │  (learnable)    │                                                │
-│   └────────┬────────┘                                                │
-│            │ [B, 1, 4096]                                            │
-│            ▼                                                         │
-│   ┌─────────────────┐                                                │
-│   │  sum_condition  │  → input_ = input_ + speaker_emb               │
-│   └─────────────────┘                                                │
-│            │                                                         │
-│            ▼                                                         │
-│   ┌─────────────────────────────────────────────────────────────┐   │
-│   │              Moshi Temporal Transformer (7B)                 │   │
-│   │                    (Full Finetuning)                         │   │
-│   └─────────────────────────────────────────────────────────────┘   │
-│                                                                      │
-└──────────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    A["Reference Audio (10-20s)"] --> B["ECAPA-TDNN Speaker Encoder<br/>(Pre-trained: Frozen or Fine-tuned)"]
+    B -->|"[B, 192/256]"| C["Projection Layer (learnable)<br/>학습 필요 (Linear 192 to 4096)"]
+    C -->|"[B, 1, 4096]"| D["sum_condition<br/>input_ = input_ + speaker_emb"]
+    D --> E["Moshi Temporal Transformer (7B)<br/>(Full Finetuning)"]
 ```
 
 #### 장점 (Pros)
@@ -179,37 +154,12 @@ Reference Audio ──┬──→ ECAPA-TDNN ──→ Projection ──→ sum
 
 #### 아키텍처 구조
 
-```
-┌──────────────────────────────────────────────────────────────────────┐
-│                 Option B: Audio Token Prompt 방식                     │
-├──────────────────────────────────────────────────────────────────────┤
-│                                                                      │
-│   Reference Audio (10-20s)                                           │
-│         │                                                            │
-│         ▼                                                            │
-│   ┌─────────────────┐                                                │
-│   │   Mimi Encoder  │  ← FROZEN                                      │
-│   │   (Neural Codec)│                                                │
-│   └────────┬────────┘                                                │
-│            │ [B, 8, T_ref] (12.5Hz → 10초 = 125 frames)             │
-│            ▼                                                         │
-│   ┌─────────────────────────────────────────────────────────────┐   │
-│   │            Reference Tokens (Prepend to Input)               │   │
-│   └─────────────────────────────────────────────────────────────┘   │
-│            │                                                         │
-│            ▼                                                         │
-│   ┌─────────────────────────────────────────────────────────────┐   │
-│   │  [REF_TOKENS | SEP | INPUT_TOKENS]                          │   │
-│   │  └── 125 frames ──┘     └── generation ──┘                  │   │
-│   └─────────────────────────────────────────────────────────────┘   │
-│            │                                                         │
-│            ▼                                                         │
-│   ┌─────────────────────────────────────────────────────────────┐   │
-│   │              Moshi Temporal Transformer (7B)                 │   │
-│   │                    (Full Finetuning)                         │   │
-│   └─────────────────────────────────────────────────────────────┘   │
-│                                                                      │
-└──────────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    A["Reference Audio (10-20s)"] --> B["Mimi Encoder (Neural Codec)<br/>FROZEN"]
+    B -->|"[B, 8, T_ref] (12.5Hz, 10초 = 125 frames)"| C["Reference Tokens (Prepend to Input)"]
+    C --> D["[REF_TOKENS | SEP | INPUT_TOKENS]<br/>125 frames + generation"]
+    D --> E["Moshi Temporal Transformer (7B)<br/>(Full Finetuning)"]
 ```
 
 #### 장점 (Pros)

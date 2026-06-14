@@ -59,32 +59,21 @@ finetune/monitoring/
 
 ### 2.2 클래스 계층 구조
 
-```
-┌─────────────────────────────────────────────────────────────────────────┐
-│                     EnhancedEvaluationOrchestrator                       │
-│  - Coordinates all monitors                                              │
-│  - Manages evaluation lifecycle                                          │
-│  - Aggregates metrics for logging                                        │
-├─────────────────────────────────────────────────────────────────────────┤
-│                                                                          │
-│  ┌──────────────────┐  ┌──────────────────┐  ┌──────────────────┐       │
-│  │ AdvancedTraining │  │ AudioQuality     │  │ SemanticQuality  │       │
-│  │ Monitor (기존)    │  │ Monitor (신규)   │  │ Monitor (신규)   │       │
-│  │                  │  │                  │  │                  │       │
-│  │ - WER/CER        │  │ - PESQ           │  │ - BLEU           │       │
-│  │ - Codebook Loss  │  │ - STOI           │  │ - Semantic Sim   │       │
-│  │ - Gradient       │  │ - MCD            │  │ - Consistency    │       │
-│  └──────────────────┘  └──────────────────┘  └──────────────────┘       │
-│                                                                          │
-│  ┌──────────────────┐  ┌──────────────────┐                              │
-│  │ Alignment        │  │ Dialogue         │                              │
-│  │ Monitor (신규)   │  │ Monitor (신규)   │                              │
-│  │                  │  │                  │                              │
-│  │ - Timing Acc     │  │ - Turn-Taking    │                              │
-│  │ - Boundary Prec  │  │ - Response Rel.  │                              │
-│  │ - Sync Score     │  │ - Flow Quality   │                              │
-│  └──────────────────┘  └──────────────────┘                              │
-└─────────────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+  ORCH["EnhancedEvaluationOrchestrator<br/>- Coordinates all monitors<br/>- Manages evaluation lifecycle<br/>- Aggregates metrics for logging"]
+
+  ATM["AdvancedTraining Monitor (기존)<br/>- WER/CER<br/>- Codebook Loss<br/>- Gradient"]
+  AQM["AudioQuality Monitor (신규)<br/>- PESQ<br/>- STOI<br/>- MCD"]
+  SQM["SemanticQuality Monitor (신규)<br/>- BLEU<br/>- Semantic Sim<br/>- Consistency"]
+  ALM["Alignment Monitor (신규)<br/>- Timing Acc<br/>- Boundary Prec<br/>- Sync Score"]
+  DM["Dialogue Monitor (신규)<br/>- Turn-Taking<br/>- Response Rel.<br/>- Flow Quality"]
+
+  ORCH --> ATM
+  ORCH --> AQM
+  ORCH --> SQM
+  ORCH --> ALM
+  ORCH --> DM
 ```
 
 ---

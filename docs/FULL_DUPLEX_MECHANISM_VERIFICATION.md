@@ -22,15 +22,15 @@
 
 **핵심 통찰**: K-Moshi의 Full-Duplex 학습에서 User audio는 **delay mechanism을 통해 자동으로 Temporal Transformer에 전달**됩니다.
 
-```
-학습 시 Input codes 구조: [B, 17, T]
-├── codes[:, 0, :] = Text (delay=0)
-├── codes[:, 1:9, :] = Moshi Audio 8개 (delay=1~8)
-└── codes[:, 9:17, :] = User Audio 8개 (delay=1~8)
-
-delay mechanism 적용 후:
-├── Moshi Audio codes → audio_embs[0:8]에서 embedding
-└── User Audio codes → **동일한 audio_embs[0:8]에서 embedding** (delay로 구분)
+```mermaid
+flowchart TD
+    subgraph S1["학습 시 Input codes 구조: (B, 17, T)"]
+        T1["codes[:, 0, :] = Text (delay=0)"]
+        M1["codes[:, 1:9, :] = Moshi Audio 8개 (delay=1~8)"]
+        U1["codes[:, 9:17, :] = User Audio 8개 (delay=1~8)"]
+    end
+    M1 -->|"delay mechanism 적용 후"| ME["Moshi Audio codes에서 audio_embs[0:8] embedding"]
+    U1 -->|"delay mechanism 적용 후"| UE["User Audio codes에서 동일한 audio_embs[0:8] embedding (delay로 구분)"]
 ```
 
 ---
@@ -125,61 +125,42 @@ delayed_codes = _delay_sequence(self._delays, codes, initial)
 
 ### 3.1 학습 시 데이터 흐름
 
-```
-Input: codes [B, 17, T]
-       ├── [:, 0, :] = Text
-       ├── [:, 1:9, :] = Moshi Audio (8 codebooks)
-       └── [:, 9:17, :] = User Audio (8 codebooks)
-                    ↓
-              _delay_sequence()
-                    ↓
-       delayed_codes [B, 17, T+max_delay]
-       (Moshi와 User가 시간축으로 정렬됨)
-                    ↓
-       input_sequence = delayed_codes[:, :, :-1]
-                    ↓
-       ┌────────────────────────────────────────┐
-       │ for cb_index in range(8):              │
-       │   audio_codes = input_sequence[:,      │
-       │                   cb_index + audio_offset]  ← 이것이 delayed 데이터
-       │   audio_emb = audio_embs[cb_index]()   │
-       │   audio_input += audio_emb             │
-       └────────────────────────────────────────┘
-                    ↓
-       combined_input = text_emb + audio_input
-                    ↓
-       Temporal Transformer
-                    ↓
-       Depformer → Audio Logits [B, 8, T, 2048]
-       (Moshi audio만 예측)
+```mermaid
+flowchart TD
+    A["Input: codes (B, 17, T)"]
+    A --- A0["[:, 0, :] = Text"]
+    A --- A1["[:, 1:9, :] = Moshi Audio (8 codebooks)"]
+    A --- A2["[:, 9:17, :] = User Audio (8 codebooks)"]
+    A2 --> B["_delay_sequence()"]
+    B --> C["delayed_codes (B, 17, T+max_delay) — Moshi와 User가 시간축으로 정렬됨"]
+    C --> D["input_sequence = delayed_codes[:, :, :-1]"]
+    D --> E["for cb_index in range(8): audio_codes = input_sequence[:, cb_index + audio_offset] (delayed 데이터); audio_emb = audio_embs[cb_index](); audio_input += audio_emb"]
+    E --> F["combined_input = text_emb + audio_input"]
+    F --> G["Temporal Transformer"]
+    G --> H["Depformer to Audio Logits (B, 8, T, 2048) — Moshi audio만 예측"]
 ```
 
 ### 3.2 추론 시 데이터 흐름
 
-```
-Real-time streams:
-       ┌─────────────────────────────────────────┐
-       │ User Audio (마이크 입력) → Mimi Encoder │
-       │                    ↓                    │
-       │            User Audio Codes [8]         │
-       └─────────────────────────────────────────┘
-                    ↓ (input_audio_codebooks=8)
-       ┌─────────────────────────────────────────┐
-       │         LmModelEnum.forward()           │
-       │  ├── text_ids (이전 생성 텍스트)        │
-       │  ├── audio_ids[0:8] = Moshi audio (생성된)│
-       │  └── audio_ids[8:16] = User audio (입력) │
-       │                    ↓                    │
-       │  for audio_emb, audio_ids in zip():    │
-       │    emb += audio_ids.apply(audio_emb)   │
-       │  (16개 모두 순회)                       │
-       └─────────────────────────────────────────┘
-                    ↓
-       Temporal Transformer
-                    ↓
-       Depformer → 다음 Moshi Audio 생성 [8]
-                    ↓
-       Mimi Decoder → Audio Output (스피커)
+```mermaid
+flowchart TD
+    subgraph R["Real-time streams"]
+        U1["User Audio (마이크 입력) to Mimi Encoder"]
+        U1 --> U2["User Audio Codes (8)"]
+    end
+    U2 -->|"input_audio_codebooks=8"| LM
+    subgraph LM["LmModelEnum.forward()"]
+        L1["text_ids (이전 생성 텍스트)"]
+        L2["audio_ids[0:8] = Moshi audio (생성된)"]
+        L3["audio_ids[8:16] = User audio (입력)"]
+        L4["for audio_emb, audio_ids in zip(): emb += audio_ids.apply(audio_emb) — 16개 모두 순회"]
+        L1 --> L4
+        L2 --> L4
+        L3 --> L4
+    end
+    LM --> TT["Temporal Transformer"]
+    TT --> DF["Depformer to 다음 Moshi Audio 생성 (8)"]
+    DF --> MD["Mimi Decoder to Audio Output (스피커)"]
 ```
 
 ---

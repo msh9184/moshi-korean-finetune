@@ -4,18 +4,11 @@ Korean Moshi 파인튜닝을 위한 데이터 전처리 파이프라인입니다
 
 ## 개요
 
-```
-Lhotse Shar 데이터 (~15,289시간)
-        ↓
-   Phase 1 (CPU)
-   - Speaker 역할 할당 (MAIN/USER)
-   - 스테레오 변환 (L=MAIN, R=USER)
-   - FLAC 압축 (50-60% 용량 절감)
-        ↓
-   스테레오 오디오 + 메타데이터
-        ↓
-   Phase 2 (GPU) - 추후 진행
-   - Word-level alignment
+```mermaid
+flowchart TD
+    A["Lhotse Shar 데이터 (~15,289시간)"] --> B["Phase 1 (CPU)<br/>- Speaker 역할 할당 (MAIN/USER)<br/>- 스테레오 변환 (L=MAIN, R=USER)<br/>- FLAC 압축 (50-60% 용량 절감)"]
+    B --> C["스테레오 오디오 + 메타데이터"]
+    C --> D["Phase 2 (GPU) - 추후 진행<br/>- Word-level alignment"]
 ```
 
 ---

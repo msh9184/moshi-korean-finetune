@@ -11,18 +11,11 @@ web client for live full-duplex Korean voice conversation.
 
 ## End-to-end pipeline
 
-```
-[ train ]   moshi-korean-finetune  ──►  LoRA adapter (lora.safetensors)
-                                         on base kyutai/moshiko + Korean tokenizer + Mimi codec
-                                              │
-[ export ]  scripts/import_rust_lora.py  ──►  fuse LoRA into base, re-serialize for Rust/Candle
-                                              │   → korean-moshi-fused.safetensors
-                                              ▼
-[ serve ]   scripts/serve_korean_moshi.sh ──► writes configs/config-korean.json,
-                                              cargo run --release -- --config ... standalone
-                                              │   (Kyutai Moshi Rust backend, HTTPS/WebSocket :8998)
-                                              ▼
-[ demo ]    web client (static_dir) ────────► browser: live Korean full-duplex voice chat
+```mermaid
+flowchart LR
+    T["Train<br/>moshi-korean-finetune"] -->|"LoRA adapter"| E["Export<br/>import_rust_lora.py<br/>(fuse to safetensors)"]
+    E --> S["Serve<br/>serve_korean_moshi.sh<br/>(Moshi Rust backend)"]
+    S -->|"WebSocket :8998"| D["Demo<br/>Korean web client"]
 ```
 
 ## What's in this overlay

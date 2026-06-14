@@ -492,60 +492,32 @@ Checkpointing:
 
 ### 5.1 컴포넌트 분류 및 학습 전략
 
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                    K-Moshi Component Training Strategy                       │
-├─────────────────────────────────────────────────────────────────────────────┤
-│                                                                             │
-│  ┌─────────────────────────────────────────────────────────────────────┐   │
-│  │ FROZEN COMPONENTS (No Training)                                      │   │
-│  │                                                                      │   │
-│  │  • Mimi Encoder      - 24kHz → 12.5Hz audio tokens                  │   │
-│  │  • Mimi Decoder      - Audio tokens → 24kHz waveform                │   │
-│  │  • Mimi RVQ          - 8-level residual vector quantization         │   │
-│  │                                                                      │   │
-│  │  이유: J-Moshi 논문에서 Mimi가 일본어에서도 잘 동작함을 확인.        │   │
-│  │        한국어도 동일하게 적용 가능할 것으로 기대.                     │   │
-│  └─────────────────────────────────────────────────────────────────────┘   │
-│                                                                             │
-│  ┌─────────────────────────────────────────────────────────────────────┐   │
-│  │ PRE-TRAINED + FINE-TUNED (LR: 2e-6 ~ 3e-5)                          │   │
-│  │                                                                      │   │
-│  │  • Temporal Transformer (7B)                                         │   │
-│  │      - 32 layers, 32 heads, 4096 hidden                             │   │
-│  │      - Pre-trained on English (Moshi)                                │   │
-│  │      - 한국어 adaptation 필요                                        │   │
-│  │      - LR: 3e-5 (pre-train) → 2e-6 (fine-tune)                      │   │
-│  │                                                                      │   │
-│  │  • Audio Embeddings (8 codebooks)                                    │   │
-│  │      - 동일 vocab size 유지 (2048 per codebook)                      │   │
-│  │      - Pre-trained weights 활용                                      │   │
-│  │                                                                      │   │
-│  │  • Audio Linears (8 output heads)                                    │   │
-│  │      - Pre-trained weights 활용                                      │   │
-│  └─────────────────────────────────────────────────────────────────────┘   │
-│                                                                             │
-│  ┌─────────────────────────────────────────────────────────────────────┐   │
-│  │ FROM SCRATCH (LR: 4e-6 ~ 8e-6)                                       │   │
-│  │                                                                      │   │
-│  │  • Depth Transformer (DepFormer)                                     │   │
-│  │      - 6 layers (smaller than TempFormer)                           │   │
-│  │      - Audio token generation along depth axis                       │   │
-│  │      - 완전히 새로 학습 필요                                         │   │
-│  │      - LR: 4e-6 (2x TempFormer)                                     │   │
-│  │                                                                      │   │
-│  │  • Text Embedding (32k Korean vocab)                                 │   │
-│  │      - 새로운 한국어 토크나이저 (32k vocab)                          │   │
-│  │      - Random initialization                                         │   │
-│  │      - LR: 4e-6 ~ 8e-6                                              │   │
-│  │                                                                      │   │
-│  │  • Text Linear (output projection)                                   │   │
-│  │      - 새로운 vocab에 맞춤                                           │   │
-│  │      - Random initialization                                         │   │
-│  │      - LR: 4e-6 ~ 8e-6                                              │   │
-│  └─────────────────────────────────────────────────────────────────────┘   │
-│                                                                             │
-└─────────────────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    Root["K-Moshi Component Training Strategy"]
+
+    subgraph FROZEN["FROZEN COMPONENTS (No Training)"]
+        F1["Mimi Encoder - 24kHz to 12.5Hz audio tokens"]
+        F2["Mimi Decoder - Audio tokens to 24kHz waveform"]
+        F3["Mimi RVQ - 8-level residual vector quantization"]
+        FNote["이유: J-Moshi 논문에서 Mimi가 일본어에서도 잘 동작함을 확인.<br/>한국어도 동일하게 적용 가능할 것으로 기대."]
+    end
+
+    subgraph PRETRAINED["PRE-TRAINED plus FINE-TUNED (LR: 2e-6 ~ 3e-5)"]
+        P1["Temporal Transformer (7B)<br/>- 32 layers, 32 heads, 4096 hidden<br/>- Pre-trained on English (Moshi)<br/>- 한국어 adaptation 필요<br/>- LR: 3e-5 (pre-train) to 2e-6 (fine-tune)"]
+        P2["Audio Embeddings (8 codebooks)<br/>- 동일 vocab size 유지 (2048 per codebook)<br/>- Pre-trained weights 활용"]
+        P3["Audio Linears (8 output heads)<br/>- Pre-trained weights 활용"]
+    end
+
+    subgraph SCRATCH["FROM SCRATCH (LR: 4e-6 ~ 8e-6)"]
+        S1["Depth Transformer (DepFormer)<br/>- 6 layers (smaller than TempFormer)<br/>- Audio token generation along depth axis<br/>- 완전히 새로 학습 필요<br/>- LR: 4e-6 (2x TempFormer)"]
+        S2["Text Embedding (32k Korean vocab)<br/>- 새로운 한국어 토크나이저 (32k vocab)<br/>- Random initialization<br/>- LR: 4e-6 ~ 8e-6"]
+        S3["Text Linear (output projection)<br/>- 새로운 vocab에 맞춤<br/>- Random initialization<br/>- LR: 4e-6 ~ 8e-6"]
+    end
+
+    Root --> FROZEN
+    Root --> PRETRAINED
+    Root --> SCRATCH
 ```
 
 ### 5.2 Parameter Group 설정

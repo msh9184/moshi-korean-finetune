@@ -31,23 +31,23 @@
 
 ### 1.2 핵심 인사이트
 
-```
-┌─────────────────────────────────────────────────────────────────────────┐
-│                    K-MOSHI HYBRID STRATEGY OVERVIEW                      │
-├─────────────────────────────────────────────────────────────────────────┤
-│                                                                          │
-│  Phase 1: Bootstrap (External TTS)                                       │
-│  ├─ OpenAudio S1 Mini: 고품질 대화 생성 (70%)                            │
-│  ├─ Supertonic-2: 빠른 대량 생성 (30%)                                   │
-│  └─ 목표: ~500-1000시간 초기 학습 데이터                                  │
-│                                                                          │
-│  Phase 2: Self-Generation                                                │
-│  ├─ 학습된 K-Moshi 모델로 추가 데이터 생성                               │
-│  ├─ WER 기반 샘플 선택 (J-Moshi 방식)                                    │
-│  └─ 목표: ~500-1000시간 추가 합성                                        │
-│                                                                          │
-│  Total Target: ~1000-2000시간 대화 데이터                                │
-└─────────────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    subgraph P1["Phase 1: Bootstrap (External TTS)"]
+        A1["OpenAudio S1 Mini: 고품질 대화 생성 (70%)"]
+        A2["Supertonic-2: 빠른 대량 생성 (30%)"]
+        A3["목표: ~500-1000시간 초기 학습 데이터"]
+        A1 --> A3
+        A2 --> A3
+    end
+    subgraph P2["Phase 2: Self-Generation"]
+        B1["학습된 K-Moshi 모델로 추가 데이터 생성"]
+        B2["WER 기반 샘플 선택 (J-Moshi 방식)"]
+        B3["목표: ~500-1000시간 추가 합성"]
+        B1 --> B2 --> B3
+    end
+    P1 --> P2
+    P2 --> T["Total Target: ~1000-2000시간 대화 데이터"]
 ```
 
 ---
@@ -58,34 +58,12 @@
 
 Post-training은 사전학습된 모델을 특정 작업이나 사용자 선호도에 맞게 조정하는 단계입니다.
 
-```
-┌─────────────────────────────────────────────────────────────────────────┐
-│                     POST-TRAINING METHODS TAXONOMY                       │
-├─────────────────────────────────────────────────────────────────────────┤
-│                                                                          │
-│  ┌─────────────────────────────────────────────────────────────────┐    │
-│  │ Supervised Fine-Tuning (SFT)                                    │    │
-│  │ • 레이블된 데이터로 직접 학습                                    │    │
-│  │ • Input → Target 매핑 학습                                      │    │
-│  │ • 가장 단순하고 안정적인 방법                                    │    │
-│  └─────────────────────────────────────────────────────────────────┘    │
-│                           ↓                                              │
-│  ┌─────────────────────────────────────────────────────────────────┐    │
-│  │ RLHF (Reinforcement Learning from Human Feedback)               │    │
-│  │ • Step 1: Reward Model 학습 (선호도 데이터)                      │    │
-│  │ • Step 2: PPO로 정책 최적화                                     │    │
-│  │ • 복잡하고 불안정, 높은 연산 비용                                │    │
-│  └─────────────────────────────────────────────────────────────────┘    │
-│                           ↓                                              │
-│  ┌─────────────────────────────────────────────────────────────────┐    │
-│  │ DPO (Direct Preference Optimization)                            │    │
-│  │ • RLHF의 단순화 버전                                            │    │
-│  │ • Reward Model 없이 직접 선호도 학습                            │    │
-│  │ • Classification loss로 변환                                     │    │
-│  │ • 훨씬 안정적이고 효율적                                        │    │
-│  └─────────────────────────────────────────────────────────────────┘    │
-│                                                                          │
-└─────────────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    SFT["Supervised Fine-Tuning (SFT)<br/>레이블된 데이터로 직접 학습<br/>Input 에서 Target 매핑 학습<br/>가장 단순하고 안정적인 방법"]
+    RLHF["RLHF (Reinforcement Learning from Human Feedback)<br/>Step 1: Reward Model 학습 (선호도 데이터)<br/>Step 2: PPO로 정책 최적화<br/>복잡하고 불안정, 높은 연산 비용"]
+    DPO["DPO (Direct Preference Optimization)<br/>RLHF의 단순화 버전<br/>Reward Model 없이 직접 선호도 학습<br/>Classification loss로 변환<br/>훨씬 안정적이고 효율적"]
+    SFT --> RLHF --> DPO
 ```
 
 ### 2.2 Moshi의 Post-Training 접근법
@@ -282,25 +260,24 @@ Moshi는 170시간의 스크립트된 대화를 수집하여:
 
 J-Moshi 방식을 한국어에 적용할 때 권장하는 텍스트 대화 데이터:
 
-```
-┌─────────────────────────────────────────────────────────────────────────┐
-│            KOREAN TEXT DIALOGUE CORPUS FOR TTS SYNTHESIS                │
-├─────────────────────────────────────────────────────────────────────────┤
-│                                                                          │
-│  1차 권장 (대화 형식 최적화)                                             │
-│  ├─ AI Hub 감성 대화 말뭉치                                             │
-│  ├─ 모두의 말뭉치 - 메신저 대화                                          │
-│  └─ 한국어 일상 대화 코퍼스                                              │
-│                                                                          │
-│  2차 권장 (LLM 변환 필요)                                                │
-│  ├─ KorQuAD → 대화체 변환                                               │
-│  ├─ 영화 리뷰 → 토론 대화 생성                                   │
-│  └─ 위키피디아 → QA 대화 생성                                           │
-│                                                                          │
-│  변환 파이프라인:                                                        │
-│  Text Corpus → LLM (구어체 변환) → TTS → WER 필터링 → 학습 데이터       │
-│                                                                          │
-└─────────────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    subgraph R1["1차 권장 (대화 형식 최적화)"]
+        A1["AI Hub 감성 대화 말뭉치"]
+        A2["모두의 말뭉치 - 메신저 대화"]
+        A3["한국어 일상 대화 코퍼스"]
+    end
+    subgraph R2["2차 권장 (LLM 변환 필요)"]
+        B1["KorQuAD 에서 대화체 변환"]
+        B2["영화 리뷰 에서 토론 대화 생성"]
+        B3["위키피디아 에서 QA 대화 생성"]
+    end
+    subgraph PIPE["변환 파이프라인"]
+        direction LR
+        C1["Text Corpus"] --> C2["LLM (구어체 변환)"] --> C3["TTS"] --> C4["WER 필터링"] --> C5["학습 데이터"]
+    end
+    R1 --> PIPE
+    R2 --> PIPE
 ```
 
 ### 3.4 Text → Spoken Dialogue 변환 전략
@@ -338,32 +315,21 @@ def convert_to_spoken_korean(text_dialogue, llm_model="gemma-2-27b"):
 
 #### 4.1.1 아키텍처
 
-```
-┌─────────────────────────────────────────────────────────────────────────┐
-│                        CSM-1B ARCHITECTURE                              │
-├─────────────────────────────────────────────────────────────────────────┤
-│                                                                          │
-│  ┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐   │
-│  │ Text Tokenizer  │     │ Mimi Codec      │     │ Backbone (1B)   │   │
-│  │ (Llama)         │     │ (Kyutai)        │     │ (Llama variant) │   │
-│  └────────┬────────┘     └────────┬────────┘     └────────┬────────┘   │
-│           │                       │                       │             │
-│           └───────────┬───────────┘                       │             │
-│                       ↓                                   │             │
-│              ┌─────────────────┐                          │             │
-│              │ Interleaved     │ ─────────────────────────┘             │
-│              │ T, A, T, A, ... │                                        │
-│              └────────┬────────┘                                        │
-│                       ↓                                                 │
-│              ┌─────────────────┐                                        │
-│              │ Decoder (100M)  │ → Codebook 1~N-1                       │
-│              └────────┬────────┘                                        │
-│                       ↓                                                 │
-│              ┌─────────────────┐                                        │
-│              │ Audio Output    │                                        │
-│              └─────────────────┘                                        │
-│                                                                          │
-└─────────────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    TT["Text Tokenizer<br/>(Llama)"]
+    MC["Mimi Codec<br/>(Kyutai)"]
+    BB["Backbone (1B)<br/>(Llama variant)"]
+    IL["Interleaved<br/>T, A, T, A, ..."]
+    DEC["Decoder (100M)"]
+    CB["Codebook 1~N-1"]
+    AO["Audio Output"]
+    TT --> IL
+    MC --> IL
+    BB --> IL
+    IL --> DEC
+    DEC --> CB
+    DEC --> AO
 ```
 
 #### 4.1.2 특징 및 한계
@@ -641,38 +607,33 @@ class HybridTTSPipeline:
 
 ### 6.2 Implementation Roadmap
 
-```
-┌─────────────────────────────────────────────────────────────────────────┐
-│                    K-MOSHI DATA SYNTHESIS ROADMAP                       │
-├─────────────────────────────────────────────────────────────────────────┤
-│                                                                          │
-│  Phase 1: Preparation                                                    │
-│  ├─ [1.1] Text Corpus 수집 및 정제                                      │
-│  │   ├─ AI Hub 감성 대화 다운로드                                       │
-│  │   ├─ 모두의 말뭉치 구어/메신저 다운로드                              │
-│  │   └─ LLM 구어체 변환 파이프라인 구축                                 │
-│  ├─ [1.2] TTS 환경 구축                                                 │
-│  │   ├─ OpenAudio S1 Mini 설치                                         │
-│  │   ├─ Supertonic-2 설치                                              │
-│  │   └─ Voice cloning 샘플 준비 (Moshi 3개, User 10개)                 │
-│  └─ [1.3] 파이프라인 검증                                               │
-│       └─ 소규모 테스트 (10시간 합성)                                    │
-│                                                                          │
-│  Phase 2: Bootstrap TTS Generation                                       │
-│  ├─ [2.1] OpenAudio S1 Mini로 고품질 합성 (~350시간)                    │
-│  ├─ [2.2] Supertonic-2로 대량 합성 (~150시간)                           │
-│  └─ [2.3] WER 기반 품질 필터링                                          │
-│                                                                          │
-│  Phase 3: Initial K-Moshi Training                                       │
-│  ├─ [3.1] Bootstrap 데이터로 초기 학습                                   │
-│  └─ [3.2] 품질 평가 및 검증                                              │
-│                                                                          │
-│  Phase 4: Self-Generation (Optional)                                     │
-│  ├─ [4.1] 학습된 K-Moshi로 추가 대화 생성                               │
-│  ├─ [4.2] WER 기반 샘플 선택 (J-Moshi 방식)                             │
-│  └─ [4.3] 추가 학습 및 반복                                              │
-│                                                                          │
-└─────────────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    subgraph PH1["Phase 1: Preparation"]
+        P11["[1.1] Text Corpus 수집 및 정제<br/>AI Hub 감성 대화 다운로드<br/>모두의 말뭉치 구어/메신저 다운로드<br/>LLM 구어체 변환 파이프라인 구축"]
+        P12["[1.2] TTS 환경 구축<br/>OpenAudio S1 Mini 설치<br/>Supertonic-2 설치<br/>Voice cloning 샘플 준비 (Moshi 3개, User 10개)"]
+        P13["[1.3] 파이프라인 검증<br/>소규모 테스트 (10시간 합성)"]
+        P11 --> P12 --> P13
+    end
+    subgraph PH2["Phase 2: Bootstrap TTS Generation"]
+        P21["[2.1] OpenAudio S1 Mini로 고품질 합성 (~350시간)"]
+        P22["[2.2] Supertonic-2로 대량 합성 (~150시간)"]
+        P23["[2.3] WER 기반 품질 필터링"]
+        P21 --> P23
+        P22 --> P23
+    end
+    subgraph PH3["Phase 3: Initial K-Moshi Training"]
+        P31["[3.1] Bootstrap 데이터로 초기 학습"]
+        P32["[3.2] 품질 평가 및 검증"]
+        P31 --> P32
+    end
+    subgraph PH4["Phase 4: Self-Generation (Optional)"]
+        P41["[4.1] 학습된 K-Moshi로 추가 대화 생성"]
+        P42["[4.2] WER 기반 샘플 선택 (J-Moshi 방식)"]
+        P43["[4.3] 추가 학습 및 반복"]
+        P41 --> P42 --> P43
+    end
+    PH1 --> PH2 --> PH3 --> PH4
 ```
 
 ### 6.3 예상 비용/시간

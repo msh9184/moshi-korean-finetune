@@ -175,48 +175,42 @@ data_preparation_stage2/
 
 ### 2.2 Processing Pipeline
 
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                       STAGE 2 SYNTHESIS PIPELINE                             │
-├─────────────────────────────────────────────────────────────────────────────┤
-│                                                                              │
-│  ┌─────────────────────────────────────────────────────────────────────┐    │
-│  │ Phase 1: Text Corpus Preparation                                    │    │
-│  │                                                                     │    │
-│  │  Raw Text    →   Normalization   →   Spoken Conversion   →   Pool   │    │
-│  │  Corpus           (정규화)            (LLM 구어체화)          (저장)  │    │
-│  │                                                                     │    │
-│  │  + Identity Q&A Templates (K-Moshi 정체성)                          │    │
-│  └─────────────────────────────────────────────────────────────────────┘    │
-│                                    ↓                                         │
-│  ┌─────────────────────────────────────────────────────────────────────┐    │
-│  │ Phase 2: Voice Preparation                                          │    │
-│  │                                                                     │    │
-│  │  Reference     →   Voice Cloning   →   Voice Registry               │    │
-│  │  Samples           (OpenAudio)          Moshi: 1 fixed voice        │    │
-│  │                                         User: 10-20 diverse voices  │    │
-│  └─────────────────────────────────────────────────────────────────────┘    │
-│                                    ↓                                         │
-│  ┌─────────────────────────────────────────────────────────────────────┐    │
-│  │ Phase 3: Dialogue Synthesis                                         │    │
-│  │                                                                     │    │
-│  │  For each dialogue:                                                 │    │
-│  │  ├─ 1. Turn Planning (timing, overlap, backchannel)                 │    │
-│  │  ├─ 2. TTS Generation (Moshi: S1 Mini, User: Hybrid 70:30)         │    │
-│  │  ├─ 3. Word Alignment (WhisperTimestamped or NFA)                  │    │
-│  │  ├─ 4. Stereo Mixing (L=Moshi, R=User with timing)                 │    │
-│  │  └─ 5. Quality Check (WER filtering, audio validation)             │    │
-│  └─────────────────────────────────────────────────────────────────────┘    │
-│                                    ↓                                         │
-│  ┌─────────────────────────────────────────────────────────────────────┐    │
-│  │ Phase 4: Output Generation                                          │    │
-│  │                                                                     │    │
-│  │  ├─ Stereo WAV (24kHz, L=Moshi, R=User)                            │    │
-│  │  ├─ Alignment JSON (word-level timestamps)                         │    │
-│  │  └─ JSONL Manifest (for training)                                   │    │
-│  └─────────────────────────────────────────────────────────────────────┘    │
-│                                                                              │
-└─────────────────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    subgraph P1["Phase 1: Text Corpus Preparation"]
+        direction LR
+        RAW["Raw Text Corpus"] --> NORM["Normalization (정규화)"]
+        NORM --> SPOKEN["Spoken Conversion (LLM 구어체화)"]
+        SPOKEN --> POOL["Pool (저장)"]
+        IDQA["+ Identity Q&amp;A Templates (K-Moshi 정체성)"]
+    end
+
+    subgraph P2["Phase 2: Voice Preparation"]
+        direction LR
+        REF["Reference Samples"] --> CLONE["Voice Cloning (OpenAudio)"]
+        CLONE --> REG["Voice Registry<br/>Moshi: 1 fixed voice<br/>User: 10-20 diverse voices"]
+    end
+
+    subgraph P3["Phase 3: Dialogue Synthesis (For each dialogue)"]
+        direction TB
+        S1["1. Turn Planning (timing, overlap, backchannel)"]
+        S2["2. TTS Generation (Moshi: S1 Mini, User: Hybrid 70:30)"]
+        S3["3. Word Alignment (WhisperTimestamped or NFA)"]
+        S4["4. Stereo Mixing (L=Moshi, R=User with timing)"]
+        S5["5. Quality Check (WER filtering, audio validation)"]
+        S1 --> S2 --> S3 --> S4 --> S5
+    end
+
+    subgraph P4["Phase 4: Output Generation"]
+        direction TB
+        O1["Stereo WAV (24kHz, L=Moshi, R=User)"]
+        O2["Alignment JSON (word-level timestamps)"]
+        O3["JSONL Manifest (for training)"]
+    end
+
+    P1 --> P2
+    P2 --> P3
+    P3 --> P4
 ```
 
 ---

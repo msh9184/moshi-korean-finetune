@@ -34,66 +34,31 @@ K-Moshi 프로젝트에서 우리가 달성하고자 하는 것:
 
 ### 2.1 방안 1: Input Conditioning (현재 구현)
 
-```
-Architecture:
-
-    Reference Audio ──► Speaker Encoder ──► Speaker Embedding [B, D_spk]
-                              │
-                              ▼
-                       Speaker Conditioner
-                              │
-                              ▼
-                        sum_condition [B, 1, D_model]
-                              │
-                              ▼
-    Input Codes ───────► Temporal Transformer ◄──────────┘
-                              │
-                              ▼
-                         Output Codes
-                              │
-                              ▼
-                    Cross-Entropy Loss (text + audio)
-
-핵심 수식:
-    h_t = f(E(x_t) + g(φ(X_ref)))
-
-    where:
-        E(x_t) = embedding of input at time t
-        φ(X_ref) = speaker encoder output
-        g(·) = speaker conditioner (projection + scale)
-        f(·) = temporal transformer
+```mermaid
+flowchart TD
+    RefAudio["Reference Audio"] --> SpkEnc["Speaker Encoder"]
+    SpkEnc --> SpkEmb["Speaker Embedding [B, D_spk]"]
+    SpkEmb --> SpkCond["Speaker Conditioner"]
+    SpkCond --> SumCond["sum_condition [B, 1, D_model]"]
+    InputCodes["Input Codes"] --> TT["Temporal Transformer"]
+    SumCond --> TT
+    TT --> OutCodes["Output Codes"]
+    OutCodes --> CELoss["Cross-Entropy Loss (text + audio)"]
 ```
 
 ### 2.2 방안 2: Distillation Loss (제안)
 
-```
-Architecture:
-
-    Reference Audio ──► Speaker Encoder ──► Speaker Embedding [B, D_spk]
-                              │                       │
-                              │                       ▼
-                              │               Target Speaker Vector
-                              │                       │
-    Input Codes ───────► Temporal Transformer         │
-                              │                       │
-                              ▼                       │
-                         Output Codes                 │
-                              │                       │
-                              ▼                       ▼
-                    Cross-Entropy Loss     +     Speaker Similarity Loss
-                              │                       │
-                              └───────────┬───────────┘
-                                          ▼
-                                    Total Loss
-
-핵심 수식:
-    L_total = L_CE(y, ŷ) + λ · L_spk(φ(Ŷ), φ(X_ref))
-
-    where:
-        L_CE = standard cross-entropy loss
-        L_spk = 1 - cos_sim(φ(Ŷ), φ(X_ref))  # cosine similarity loss
-        φ(·) = speaker encoder
-        λ = loss weighting coefficient
+```mermaid
+flowchart TD
+    RefAudio["Reference Audio"] --> SpkEnc["Speaker Encoder"]
+    SpkEnc --> SpkEmb["Speaker Embedding [B, D_spk]"]
+    SpkEmb --> TgtVec["Target Speaker Vector"]
+    InputCodes["Input Codes"] --> TT["Temporal Transformer"]
+    TT --> OutCodes["Output Codes"]
+    OutCodes --> CELoss["Cross-Entropy Loss"]
+    TgtVec --> SpkLoss["Speaker Similarity Loss"]
+    CELoss --> TotalLoss["Total Loss"]
+    SpkLoss --> TotalLoss
 ```
 
 ---
@@ -104,40 +69,20 @@ Architecture:
 
 #### Input Conditioning
 
-```
-정보 흐름:
-    Speaker Info ──► [Explicit Input] ──► Model ──► Output
-                           ↑
-                    Direct injection
-
-장점:
-    - 화자 정보가 명시적으로 모델에 전달됨
-    - 모델이 "무엇을 생성해야 하는지" 직접 알려줌
-    - 학습이 안정적 (explicit conditioning signal)
-
-단점:
-    - 모델이 speaker embedding에 과도하게 의존할 수 있음
-    - Speaker encoder의 품질에 직접적으로 의존
-    - Inference 시 반드시 reference audio 필요
+```mermaid
+flowchart LR
+    SpkInfo["Speaker Info"] --> ExplicitInput["[Explicit Input]<br/>(Direct injection)"]
+    ExplicitInput --> Model["Model"]
+    Model --> Output["Output"]
 ```
 
 #### Distillation Loss
 
-```
-정보 흐름:
-    Speaker Info ──► [Implicit Supervision] ──► Model ──► Output
-                           ↑
-                    Indirect guidance via loss
-
-장점:
-    - 모델이 자체적으로 화자 특성을 학습
-    - Speaker embedding space와의 alignment 학습
-    - 잠재적으로 더 robust한 화자 표현 학습 가능
-
-단점:
-    - 학습이 불안정할 수 있음 (implicit signal)
-    - 수렴이 느림
-    - Output audio를 다시 speaker encoder에 통과시켜야 함 (계산 비용)
+```mermaid
+flowchart LR
+    SpkInfo["Speaker Info"] --> ImplicitSup["[Implicit Supervision]<br/>(Indirect guidance via loss)"]
+    ImplicitSup --> Model["Model"]
+    Model --> Output["Output"]
 ```
 
 ### 3.2 수학적 관점 (Mathematical Perspective)
@@ -223,53 +168,48 @@ Backward:
 ### 4.2 "어떻게 화자 정보를 사용하는가?"
 
 #### Input Conditioning
-```
-Reference Audio → Speaker Encoder → [Fixed Representation]
-                                            ↓
-                                    "This is target speaker"
-                                            ↓
-Model: "I will generate audio that matches this speaker embedding"
+```mermaid
+flowchart TD
+    RefAudio["Reference Audio"] --> SpkEnc["Speaker Encoder"]
+    SpkEnc --> FixedRep["[Fixed Representation]<br/>This is target speaker"]
+    FixedRep --> Model["Model: I will generate audio that matches this speaker embedding"]
 ```
 
 #### Distillation Loss
-```
-Reference Audio → Speaker Encoder → [Target Representation]
-                                            ↓
-Model generates audio → Speaker Encoder → [Output Representation]
-                                            ↓
-Loss: "Make output representation similar to target representation"
-                                            ↓
-Model: "I need to learn what makes a speaker's voice distinctive"
+```mermaid
+flowchart TD
+    RefAudio["Reference Audio"] --> SpkEnc1["Speaker Encoder"]
+    SpkEnc1 --> TgtRep["[Target Representation]"]
+    TgtRep --> ModelGen["Model generates audio"]
+    ModelGen --> SpkEnc2["Speaker Encoder"]
+    SpkEnc2 --> OutRep["[Output Representation]"]
+    OutRep --> Loss["Loss: Make output representation similar to target representation"]
+    Loss --> Model["Model: I need to learn what makes a speaker's voice distinctive"]
 ```
 
 ### 4.3 Inference 시 차이
 
 #### Input Conditioning
-```
-Inference:
-    Reference Audio ──► Speaker Encoder ──► Speaker Embedding
-                                                    ↓
-                                            Model generates
-                                                    ↓
-                                              Output Audio
-
-특징: Reference audio가 반드시 필요 (zero-shot 시나리오)
+```mermaid
+flowchart TD
+    RefAudio["Reference Audio"] --> SpkEnc["Speaker Encoder"]
+    SpkEnc --> SpkEmb["Speaker Embedding"]
+    SpkEmb --> Model["Model generates"]
+    Model --> OutAudio["Output Audio"]
 ```
 
 #### Distillation Loss
-```
-Inference (Option A - Zero-shot):
-    Reference Audio ──► Speaker Encoder ──► Speaker Embedding
-                                                    ↓
-                                            (Optional input?)
-                                                    ↓
-                                              Output Audio
-
-Inference (Option B - Without reference):
-    Model generates based on learned speaker patterns
-
-문제: Distillation만으로는 inference 시 화자 지정이 모호함
-해결: Input Conditioning과 결합 필요
+```mermaid
+flowchart TD
+    subgraph OptA["Option A - Zero-shot"]
+        RefAudio["Reference Audio"] --> SpkEnc["Speaker Encoder"]
+        SpkEnc --> SpkEmb["Speaker Embedding"]
+        SpkEmb --> OptInput["(Optional input?)"]
+        OptInput --> OutAudioA["Output Audio"]
+    end
+    subgraph OptB["Option B - Without reference"]
+        ModelB["Model generates based on learned speaker patterns"]
+    end
 ```
 
 ---
@@ -332,44 +272,21 @@ Inference (Option B - Without reference):
 
 ### 6.1 Non-Differentiable Bottleneck
 
-```
-문제:
-    Output Logits ──► Argmax ──► Discrete Codes ──► Audio ──► Speaker Encoder
-                        ↑
-              Non-differentiable!
-
-해결 방안:
-
-1. Straight-Through Estimator (STE):
-   Forward: hard argmax
-   Backward: soft gradient (as if softmax)
-
-2. Gumbel-Softmax:
-   Continuous relaxation of categorical sampling
-   τ (temperature) annealing during training
-
-3. REINFORCE / Policy Gradient:
-   Treat as RL problem
-   High variance, need baseline
-
-4. Soft Audio Representation:
-   Use expected embedding: E[φ(x)] ≈ Σ p(c_i) · φ(decode(c_i))
-   Computationally expensive
+```mermaid
+flowchart LR
+    Logits["Output Logits"] --> Argmax["Argmax<br/>(Non-differentiable!)"]
+    Argmax --> Codes["Discrete Codes"]
+    Codes --> Audio["Audio"]
+    Audio --> SpkEnc["Speaker Encoder"]
 ```
 
 ### 6.2 Speaker Encoder Differentiability
 
-```
-대부분의 Speaker Encoder는 differentiable:
-  - W2v-BERT 2.0: ✅ differentiable (transformer)
-  - ECAPA-TDNN: ✅ differentiable (CNN + attention)
-
-그러나 중간에 discrete bottleneck이 있으면:
-  Audio Codes → Decode → Waveform → Speaker Encoder
-                  ↑
-          Mimi decoder (differentiable)
-
-  전체 chain은 differentiable if using continuous relaxation
+```mermaid
+flowchart LR
+    Codes["Audio Codes"] --> Decode["Decode<br/>(Mimi decoder, differentiable)"]
+    Decode --> Waveform["Waveform"]
+    Waveform --> SpkEnc["Speaker Encoder"]
 ```
 
 ### 6.3 Computational Cost

@@ -38,29 +38,19 @@ Phase 3: Hybrid (D) - 최적화
 
 ### 2.1 주요 모델 아키텍처 비교
 
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                    Zero-Shot TTS 아키텍처 스펙트럼                           │
-├─────────────────────────────────────────────────────────────────────────────┤
-│                                                                             │
-│  ┌─────────────┐     ┌─────────────┐     ┌─────────────┐     ┌───────────┐ │
-│  │ VALL-E      │     │ CosyVoice2  │     │ Chatterbox  │     │ F-actor   │ │
-│  │ (Microsoft) │     │ (Alibaba)   │     │ (Resemble)  │     │ (2025)    │ │
-│  └──────┬──────┘     └──────┬──────┘     └──────┬──────┘     └─────┬─────┘ │
-│         │                   │                   │                   │       │
-│         ▼                   ▼                   ▼                   ▼       │
-│  Audio Token          Reference Audio     Speaker Embedding   Speaker Emb   │
-│  Prompt (3초)         + Flow Matching     (Few seconds)       + Instruction │
-│  ────────────────────────────────────────────────────────────────────────── │
-│                                                                             │
-│  특징:                                                                      │
-│  ────────────────────────────────────────────────────────────────────────── │
-│  • 8 codebooks        • ERes2Net speaker   • LLaMA backbone   • ECAPA-TDNN  │
-│  • EnCodec            • Supervised tokens   • 350M-500M       • 투영 layer │
-│  • AR + NAR           • CFM decoder         • Emotion control • Instruction │
-│  • 60K hrs data       • 166K hrs data       • Cross-lingual   • 2K hrs data │
-│                                                                             │
-└─────────────────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    subgraph SPEC["Zero-Shot TTS 아키텍처 스펙트럼"]
+        direction LR
+        A["VALL-E (Microsoft)"] --> A2["Audio Token Prompt (3초)"]
+        B["CosyVoice2 (Alibaba)"] --> B2["Reference Audio + Flow Matching"]
+        C["Chatterbox (Resemble)"] --> C2["Speaker Embedding (Few seconds)"]
+        D["F-actor (2025)"] --> D2["Speaker Emb + Instruction"]
+        A2 --> A3["특징: 8 codebooks / EnCodec / AR + NAR / 60K hrs data"]
+        B2 --> B3["특징: ERes2Net speaker / Supervised tokens / CFM decoder / 166K hrs data"]
+        C2 --> C3["특징: LLaMA backbone / 350M-500M / Emotion control / Cross-lingual"]
+        D2 --> D3["특징: ECAPA-TDNN / 투영 layer / Instruction / 2K hrs data"]
+    end
 ```
 
 ### 2.2 Speaker Conditioning 방식 분류
@@ -220,63 +210,23 @@ return ConditionAttributes(text=text, tensor=tensors)
 
 ### 3.4 삽입 가능 지점 요약
 
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                 Moshi Speaker Conditioning 삽입 지점                         │
-├─────────────────────────────────────────────────────────────────────────────┤
-│                                                                             │
-│  Input Sequence                                                             │
-│  [Text tokens] + [Audio tokens (user)] + [Audio tokens (moshi)]            │
-│        │               │                       │                           │
-│        ▼               ▼                       ▼                           │
-│  ┌─────────────────────────────────────────────────────────────────────┐    │
-│  │                      Embedding Layer                                 │    │
-│  │  text_emb + audio_emb[0..7] → input_                                │    │
-│  └─────────────────────────────────────────────────────────────────────┘    │
-│                              │                                              │
-│                              ▼                                              │
-│  ┌─────────────────────────────────────────────────────────────────────┐    │
-│  │  ★ 삽입 지점 1: Sum Conditioning                                     │    │
-│  │                                                                     │    │
-│  │  input_ = input_ + speaker_condition   ← 여기!                      │    │
-│  │                                                                     │    │
-│  │  • Speaker encoder output (ECAPA-TDNN) 투영 후 사용                 │    │
-│  │  • 모든 timestep에 동일한 speaker 정보 제공                         │    │
-│  │  • 구현: ConditionFuser.get_sum() 활용                              │    │
-│  └─────────────────────────────────────────────────────────────────────┘    │
-│                              │                                              │
-│                              ▼                                              │
-│  ┌─────────────────────────────────────────────────────────────────────┐    │
-│  │  ★ 삽입 지점 2: Cross-Attention                                      │    │
-│  │                                                                     │    │
-│  │  transformer(input_, cross_attention_src=speaker_context) ← 여기!  │    │
-│  │                                                                     │    │
-│  │  • Reference audio를 별도 encoder로 처리한 결과                     │    │
-│  │  • Attention으로 필요한 정보 선택적 참조                            │    │
-│  │  • 구현: ConditionFuser.get_cross() 활용                            │    │
-│  └─────────────────────────────────────────────────────────────────────┘    │
-│                              │                                              │
-│                              ▼                                              │
-│  ┌─────────────────────────────────────────────────────────────────────┐    │
-│  │                   Main Transformer (7B)                              │    │
-│  │  StreamingTransformer with cross_attention support                  │    │
-│  └─────────────────────────────────────────────────────────────────────┘    │
-│                              │                                              │
-│                              ▼                                              │
-│                        Depformer → Audio Logits                            │
-│                                                                             │
-└─────────────────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    IN["Input Sequence: (Text tokens) + (Audio tokens user) + (Audio tokens moshi)"]
+    EMB["Embedding Layer: text_emb + audio_emb(0..7) to input_"]
+    P1["★ 삽입 지점 1: Sum Conditioning<br/>input_ = input_ + speaker_condition (여기!)<br/>• Speaker encoder output (ECAPA-TDNN) 투영 후 사용<br/>• 모든 timestep에 동일한 speaker 정보 제공<br/>• 구현: ConditionFuser.get_sum() 활용"]
+    P2["★ 삽입 지점 2: Cross-Attention<br/>transformer(input_, cross_attention_src=speaker_context) (여기!)<br/>• Reference audio를 별도 encoder로 처리한 결과<br/>• Attention으로 필요한 정보 선택적 참조<br/>• 구현: ConditionFuser.get_cross() 활용"]
+    MT["Main Transformer (7B): StreamingTransformer with cross_attention support"]
+    DEP["Depformer to Audio Logits"]
+    IN --> EMB --> P1 --> P2 --> MT --> DEP
 
-★ 삽입 지점 3: Input Prepend (Audio Token Prompt)
-
-┌─────────────────────────────────────────────────────────────────────────────┐
-│  Original: [Text] [User Audio] [Moshi Audio]                                │
-│                                                                             │
-│  Modified: [Speaker Ref Tokens] [Text] [User Audio] [Moshi Audio]          │
-│            ↑                                                                │
-│            Reference audio를 Mimi로 encode한 토큰                          │
-│            (VALL-E prompt 방식)                                             │
-└─────────────────────────────────────────────────────────────────────────────┘
+    subgraph PRE["★ 삽입 지점 3: Input Prepend (Audio Token Prompt)"]
+        ORIG["Original: (Text) (User Audio) (Moshi Audio)"]
+        MOD["Modified: (Speaker Ref Tokens) (Text) (User Audio) (Moshi Audio)"]
+        REF["Reference audio를 Mimi로 encode한 토큰 (VALL-E prompt 방식)"]
+        ORIG --> MOD
+        REF -.-> MOD
+    end
 ```
 
 ---
@@ -287,42 +237,15 @@ return ConditionAttributes(text=text, tensor=tensors)
 
 #### 4.1.1 아키텍처
 
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                   Option A: Speaker Encoder Approach                         │
-├─────────────────────────────────────────────────────────────────────────────┤
-│                                                                             │
-│  Reference Audio (10-20초)                                                  │
-│        │                                                                    │
-│        ▼                                                                    │
-│  ┌─────────────────────────────────────────────────────────────────────┐    │
-│  │                ECAPA-TDNN / ERes2Net / WavLM                        │    │
-│  │                                                                     │    │
-│  │  • Pre-trained speaker verification model                          │    │
-│  │  • Output: 192-512 dim speaker embedding                           │    │
-│  │  • Frozen during K-Moshi training                                  │    │
-│  └─────────────────────────────────────────────────────────────────────┘    │
-│        │                                                                    │
-│        ▼  speaker_emb: [B, D_spk]                                          │
-│  ┌─────────────────────────────────────────────────────────────────────┐    │
-│  │                Speaker Projection Layer (trainable)                  │    │
-│  │                                                                     │    │
-│  │  Linear(D_spk, D_model) → [B, D_model]                             │    │
-│  │                                                                     │    │
-│  │  (D_spk=192, D_model=4096 for Moshi 7B)                            │    │
-│  └─────────────────────────────────────────────────────────────────────┘    │
-│        │                                                                    │
-│        ▼  speaker_condition: [B, 1, D_model]                               │
-│  ┌─────────────────────────────────────────────────────────────────────┐    │
-│  │                     Moshi LMModel                                    │    │
-│  │                                                                     │    │
-│  │  forward_text(..., sum_condition=speaker_condition)                │    │
-│  │                                                                     │    │
-│  │  # 내부에서:                                                         │    │
-│  │  input_ = text_emb + audio_emb + speaker_condition                 │    │
-│  └─────────────────────────────────────────────────────────────────────┘    │
-│                                                                             │
-└─────────────────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    REF["Reference Audio (10-20초)"]
+    ENC["ECAPA-TDNN / ERes2Net / WavLM<br/>• Pre-trained speaker verification model<br/>• Output: 192-512 dim speaker embedding<br/>• Frozen during K-Moshi training"]
+    PROJ["Speaker Projection Layer (trainable)<br/>Linear(D_spk, D_model) to (B, D_model)<br/>(D_spk=192, D_model=4096 for Moshi 7B)"]
+    LM["Moshi LMModel<br/>forward_text(..., sum_condition=speaker_condition)<br/>내부에서: input_ = text_emb + audio_emb + speaker_condition"]
+    REF --> ENC
+    ENC -->|"speaker_emb: (B, D_spk)"| PROJ
+    PROJ -->|"speaker_condition: (B, 1, D_model)"| LM
 ```
 
 #### 4.1.2 구현 코드 스케치
@@ -397,45 +320,15 @@ training_objective:
 
 #### 4.2.1 아키텍처
 
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                   Option B: Audio Token Prompt Approach                      │
-├─────────────────────────────────────────────────────────────────────────────┤
-│                                                                             │
-│  Reference Audio (10-20초)                                                  │
-│        │                                                                    │
-│        ▼                                                                    │
-│  ┌─────────────────────────────────────────────────────────────────────┐    │
-│  │                    Mimi Encoder (frozen)                             │    │
-│  │                                                                     │    │
-│  │  • 기존 Moshi의 codec encoder 그대로 사용                           │    │
-│  │  • Output: 8 codebook tokens at 12.5Hz                             │    │
-│  │  • 10초 audio → ~125 frames                                         │    │
-│  └─────────────────────────────────────────────────────────────────────┘    │
-│        │                                                                    │
-│        ▼  ref_tokens: [B, 8, T_ref]                                        │
-│  ┌─────────────────────────────────────────────────────────────────────┐    │
-│  │              Input Sequence Construction                             │    │
-│  │                                                                     │    │
-│  │  Original Moshi input:                                              │    │
-│  │  [Text_stream] [User_audio] [Moshi_audio]                          │    │
-│  │                                                                     │    │
-│  │  Modified input:                                                    │    │
-│  │  [Speaker_ref_tokens] [SEP] [Text_stream] [User_audio] [Moshi_audio]│    │
-│  │  ↑                                                                  │    │
-│  │  Reference audio의 Mimi tokens (prepend)                           │    │
-│  └─────────────────────────────────────────────────────────────────────┘    │
-│        │                                                                    │
-│        ▼                                                                    │
-│  ┌─────────────────────────────────────────────────────────────────────┐    │
-│  │                     Moshi LMModel                                    │    │
-│  │                                                                     │    │
-│  │  • Autoregressive하게 reference 토큰 "재생"                         │    │
-│  │  • Model이 speaker 특성을 context에서 학습                          │    │
-│  │  • In-context learning 방식                                         │    │
-│  └─────────────────────────────────────────────────────────────────────┘    │
-│                                                                             │
-└─────────────────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    REF["Reference Audio (10-20초)"]
+    MIMI["Mimi Encoder (frozen)<br/>• 기존 Moshi의 codec encoder 그대로 사용<br/>• Output: 8 codebook tokens at 12.5Hz<br/>• 10초 audio to ~125 frames"]
+    SEQ["Input Sequence Construction<br/>Original Moshi input: (Text_stream) (User_audio) (Moshi_audio)<br/>Modified input: (Speaker_ref_tokens) (SEP) (Text_stream) (User_audio) (Moshi_audio)<br/>Reference audio의 Mimi tokens (prepend)"]
+    LM["Moshi LMModel<br/>• Autoregressive하게 reference 토큰 재생<br/>• Model이 speaker 특성을 context에서 학습<br/>• In-context learning 방식"]
+    REF --> MIMI
+    MIMI -->|"ref_tokens: (B, 8, T_ref)"| SEQ
+    SEQ --> LM
 ```
 
 #### 4.2.2 장단점 분석
@@ -464,38 +357,13 @@ trade_offs:
 
 #### 4.3.1 아키텍처
 
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                   Option C: Cross-Attention Approach                         │
-├─────────────────────────────────────────────────────────────────────────────┤
-│                                                                             │
-│  Reference Audio                                                            │
-│        │                                                                    │
-│        ▼                                                                    │
-│  ┌─────────────────────────────────────────────────────────────────────┐    │
-│  │            Speaker Context Encoder (trainable)                       │    │
-│  │                                                                     │    │
-│  │  • WavLM / HuBERT / Custom encoder                                 │    │
-│  │  • Output: [B, T_ref, D_context] 가변 길이 context                 │    │
-│  │  • Speaker의 detailed acoustic features 보존                       │    │
-│  └─────────────────────────────────────────────────────────────────────┘    │
-│        │                                                                    │
-│        ▼  speaker_context: [B, T_ref, D_context]                           │
-│  ┌─────────────────────────────────────────────────────────────────────┐    │
-│  │                     Moshi Transformer                                │    │
-│  │                                                                     │    │
-│  │  for each layer:                                                    │    │
-│  │      self_attn_out = self_attention(x)                             │    │
-│  │      cross_attn_out = cross_attention(                             │    │
-│  │          query=self_attn_out,                                      │    │
-│  │          key=speaker_context,                                      │    │
-│  │          value=speaker_context                                     │    │
-│  │      )                                                             │    │
-│  │      x = self_attn_out + cross_attn_out                           │    │
-│  │      x = ffn(x)                                                    │    │
-│  └─────────────────────────────────────────────────────────────────────┘    │
-│                                                                             │
-└─────────────────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    REF["Reference Audio"]
+    SCE["Speaker Context Encoder (trainable)<br/>• WavLM / HuBERT / Custom encoder<br/>• Output: (B, T_ref, D_context) 가변 길이 context<br/>• Speaker의 detailed acoustic features 보존"]
+    MT["Moshi Transformer (per layer)<br/>self_attn_out = self_attention(x)<br/>cross_attn_out = cross_attention(query=self_attn_out, key=speaker_context, value=speaker_context)<br/>x = self_attn_out + cross_attn_out<br/>x = ffn(x)"]
+    REF --> SCE
+    SCE -->|"speaker_context: (B, T_ref, D_context)"| MT
 ```
 
 #### 4.3.2 Moshi 지원 현황
@@ -516,58 +384,32 @@ transformer_out = self.transformer(input_, cross_attention_src=cross_attention_s
 
 #### 4.4.1 아키텍처
 
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                      Option D: Hybrid Approach                               │
-├─────────────────────────────────────────────────────────────────────────────┤
-│                                                                             │
-│  Reference Audio (10-20초)                                                  │
-│        │                                                                    │
-│        ├────────────────────────┬────────────────────────┐                  │
-│        ▼                        ▼                        ▼                  │
-│  ┌──────────────┐    ┌──────────────────┐    ┌──────────────────┐          │
-│  │ ECAPA-TDNN   │    │    Mimi Encoder  │    │ (Optional)       │          │
-│  │ (Global ID)  │    │ (Local Detail)   │    │ WavLM Context    │          │
-│  └──────────────┘    └──────────────────┘    └──────────────────┘          │
-│        │                        │                        │                  │
-│        ▼                        ▼                        ▼                  │
-│  speaker_emb           ref_tokens              speaker_context             │
-│  [B, D_spk]            [B, 8, T_ref]           [B, T, D_ctx]               │
-│        │                        │                        │                  │
-│        ▼                        │                        │                  │
-│  ┌──────────────┐               │                        │                  │
-│  │  Projection  │               │                        │                  │
-│  └──────────────┘               │                        │                  │
-│        │                        │                        │                  │
-│        ▼                        │                        │                  │
-│  sum_condition                  │                        │                  │
-│  [B, 1, D_model]                │                        │                  │
-│        │                        │                        │                  │
-│        │    ┌───────────────────┘                        │                  │
-│        │    │                                            │                  │
-│        │    ▼                                            │                  │
-│        │  Input prepend                                  │                  │
-│        │  [ref_tokens] + [original_input]                │                  │
-│        │    │                                            │                  │
-│        │    │    ┌───────────────────────────────────────┘                  │
-│        │    │    │                                                          │
-│        ▼    ▼    ▼                                                          │
-│  ┌─────────────────────────────────────────────────────────────────────┐    │
-│  │                         Moshi LMModel                               │    │
-│  │                                                                     │    │
-│  │  forward_text(                                                      │    │
-│  │      sequence=[ref_tokens] + [input],     # Local detail           │    │
-│  │      sum_condition=speaker_emb_projected, # Global ID              │    │
-│  │      cross_attention_src=speaker_context  # Rich context (optional)│    │
-│  │  )                                                                 │    │
-│  └─────────────────────────────────────────────────────────────────────┘    │
-│                                                                             │
-│  Benefits:                                                                  │
-│  • Global speaker ID: 안정적인 화자 특성 유지                              │
-│  • Local detail: Prosody, pitch 등 세부 특성 전달                          │
-│  • Rich context: 필요시 더 detailed 정보 참조                              │
-│                                                                             │
-└─────────────────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    REF["Reference Audio (10-20초)"]
+    ECAPA["ECAPA-TDNN (Global ID)"]
+    MIMI["Mimi Encoder (Local Detail)"]
+    WAVLM["(Optional) WavLM Context"]
+    REF --> ECAPA
+    REF --> MIMI
+    REF --> WAVLM
+    SE["speaker_emb (B, D_spk)"]
+    RT["ref_tokens (B, 8, T_ref)"]
+    SC["speaker_context (B, T, D_ctx)"]
+    ECAPA --> SE
+    MIMI --> RT
+    WAVLM --> SC
+    PROJ["Projection"]
+    SUM["sum_condition (B, 1, D_model)"]
+    PREP["Input prepend: (ref_tokens) + (original_input)"]
+    SE --> PROJ --> SUM
+    RT --> PREP
+    LM["Moshi LMModel<br/>forward_text(<br/>sequence=(ref_tokens) + (input), # Local detail<br/>sum_condition=speaker_emb_projected, # Global ID<br/>cross_attention_src=speaker_context # Rich context (optional)<br/>)"]
+    SUM --> LM
+    PREP --> LM
+    SC --> LM
+    BEN["Benefits:<br/>• Global speaker ID: 안정적인 화자 특성 유지<br/>• Local detail: Prosody, pitch 등 세부 특성 전달<br/>• Rich context: 필요시 더 detailed 정보 참조"]
+    LM --> BEN
 ```
 
 ---
@@ -598,33 +440,15 @@ key_principle: |
 
 ### 5.2 Ground Truth 설정
 
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                      학습 시 Ground Truth 설정                               │
-├─────────────────────────────────────────────────────────────────────────────┤
-│                                                                             │
-│  Input:                                                                     │
-│  ┌─────────────────────────────────────────────────────────────────────┐    │
-│  │ 1. User audio stream (Right channel)                                │    │
-│  │ 2. Text content (from alignments)                                  │    │
-│  │ 3. Speaker reference (별도 파일, same speaker as Left)             │    │
-│  └─────────────────────────────────────────────────────────────────────┘    │
-│                                                                             │
-│  Target (Ground Truth):                                                     │
-│  ┌─────────────────────────────────────────────────────────────────────┐    │
-│  │ 1. K-Moshi audio stream (Left channel) → audio loss               │    │
-│  │ 2. K-Moshi text stream (from alignments) → text loss              │    │
-│  └─────────────────────────────────────────────────────────────────────┘    │
-│                                                                             │
-│  핵심: Speaker reference ≠ Target audio (내용 다름, 화자 동일)             │
-│                                                                             │
-│  학습 목표:                                                                 │
-│  • Speaker reference에서 화자 특성 추출                                    │
-│  • 추출한 특성 + 입력 content → Target audio 생성                         │
-│  • Cross-entropy loss on text tokens                                       │
-│  • Cross-entropy loss on audio tokens (8 codebooks)                        │
-│                                                                             │
-└─────────────────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    subgraph G["학습 시 Ground Truth 설정"]
+        IN["Input:<br/>1. User audio stream (Right channel)<br/>2. Text content (from alignments)<br/>3. Speaker reference (별도 파일, same speaker as Left)"]
+        TGT["Target (Ground Truth):<br/>1. K-Moshi audio stream (Left channel) to audio loss<br/>2. K-Moshi text stream (from alignments) to text loss"]
+        KEY["핵심: Speaker reference 는 Target audio 와 다름 (내용 다름, 화자 동일)"]
+        OBJ["학습 목표:<br/>• Speaker reference에서 화자 특성 추출<br/>• 추출한 특성 + 입력 content to Target audio 생성<br/>• Cross-entropy loss on text tokens<br/>• Cross-entropy loss on audio tokens (8 codebooks)"]
+        IN --> TGT --> KEY --> OBJ
+    end
 ```
 
 ### 5.3 학습 파이프라인
@@ -702,114 +526,45 @@ def inference(user_input_audio, target_speaker_reference, text_response):
 
 ### 6.1 Speaker-Content Disentanglement
 
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                    Challenge: Speaker-Content 분리                          │
-├─────────────────────────────────────────────────────────────────────────────┤
-│                                                                             │
-│  문제:                                                                      │
-│  Speaker reference의 "content"가 생성 결과에 영향을 미침                   │
-│                                                                             │
-│  예시:                                                                      │
-│  Reference: "안녕하세요, 반갑습니다"                                       │
-│  Target text: "오늘 날씨가 좋네요"                                         │
-│  ❌ Bad output: "안녕하세요" 같은 단어가 섞여 나옴                         │
-│  ✓ Good output: Reference 화자 목소리로 "오늘 날씨가 좋네요"               │
-│                                                                             │
-│  해결책:                                                                    │
-│  ────────────────────────────────────────────────────────────────────────── │
-│  1. Speaker Encoder 사용 (Option A)                                        │
-│     - ECAPA-TDNN은 speaker verification용으로 학습됨                       │
-│     - Content-independent한 speaker 특성만 추출하도록 설계됨               │
-│     - 가장 깔끔한 분리                                                     │
-│                                                                             │
-│  2. Multiple Reference 사용                                                 │
-│     - 동일 화자의 여러 발화를 reference로 사용                             │
-│     - Content 정보가 평균화되어 희석                                       │
-│     - CosyVoice의 multi-reference approach                                 │
-│                                                                             │
-│  3. Contrastive Learning                                                    │
-│     - 동일 화자, 다른 content → speaker embedding 유사하게                 │
-│     - 다른 화자, 같은 content → speaker embedding 다르게                   │
-│     - 추가 학습 필요                                                       │
-│                                                                             │
-└─────────────────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    subgraph CH["Challenge: Speaker-Content 분리"]
+        PROB["문제: Speaker reference의 content 가 생성 결과에 영향을 미침"]
+        EX["예시:<br/>Reference: 안녕하세요, 반갑습니다<br/>Target text: 오늘 날씨가 좋네요<br/>Bad output: 안녕하세요 같은 단어가 섞여 나옴<br/>Good output: Reference 화자 목소리로 오늘 날씨가 좋네요"]
+        S1["해결책 1. Speaker Encoder 사용 (Option A)<br/>- ECAPA-TDNN은 speaker verification용으로 학습됨<br/>- Content-independent한 speaker 특성만 추출하도록 설계됨<br/>- 가장 깔끔한 분리"]
+        S2["해결책 2. Multiple Reference 사용<br/>- 동일 화자의 여러 발화를 reference로 사용<br/>- Content 정보가 평균화되어 희석<br/>- CosyVoice의 multi-reference approach"]
+        S3["해결책 3. Contrastive Learning<br/>- 동일 화자, 다른 content to speaker embedding 유사하게<br/>- 다른 화자, 같은 content to speaker embedding 다르게<br/>- 추가 학습 필요"]
+        PROB --> EX
+        EX --> S1
+        EX --> S2
+        EX --> S3
+    end
 ```
 
 ### 6.2 Streaming 호환성
 
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                    Challenge: Streaming Compatibility                        │
-├─────────────────────────────────────────────────────────────────────────────┤
-│                                                                             │
-│  Moshi의 강점: Full-duplex streaming                                        │
-│  도전: Speaker conditioning을 streaming에 어떻게 통합?                     │
-│                                                                             │
-│  ────────────────────────────────────────────────────────────────────────── │
-│                                                                             │
-│  Option A (Speaker Encoder) - Streaming 친화적 ✓                           │
-│  ┌─────────────────────────────────────────────────────────────────────┐    │
-│  │  Initialization:                                                    │    │
-│  │    speaker_condition = speaker_encoder(reference)  # 1회 계산       │    │
-│  │                                                                     │    │
-│  │  Streaming loop:                                                    │    │
-│  │    for chunk in audio_stream:                                       │    │
-│  │        output = model.step(chunk, sum_condition=speaker_condition)  │    │
-│  │        # speaker_condition은 매 step 동일하게 사용                  │    │
-│  └─────────────────────────────────────────────────────────────────────┘    │
-│                                                                             │
-│  Option B (Token Prompt) - Streaming 복잡 ⚠                                │
-│  ┌─────────────────────────────────────────────────────────────────────┐    │
-│  │  문제:                                                              │    │
-│  │    - Reference tokens을 매번 context에 포함해야 함                  │    │
-│  │    - Context window 소비 증가                                       │    │
-│  │    - 긴 대화에서 context overflow 위험                              │    │
-│  │                                                                     │    │
-│  │  해결책:                                                            │    │
-│  │    - KV cache에 reference tokens의 attention 결과 저장              │    │
-│  │    - Sliding window에서 reference 부분은 유지                       │    │
-│  └─────────────────────────────────────────────────────────────────────┘    │
-│                                                                             │
-└─────────────────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    subgraph CH["Challenge: Streaming Compatibility"]
+        TOP["Moshi의 강점: Full-duplex streaming<br/>도전: Speaker conditioning을 streaming에 어떻게 통합?"]
+        OA["Option A (Speaker Encoder) - Streaming 친화적<br/>Initialization: speaker_condition = speaker_encoder(reference) # 1회 계산<br/>Streaming loop: for chunk in audio_stream: output = model.step(chunk, sum_condition=speaker_condition)<br/>speaker_condition은 매 step 동일하게 사용"]
+        OB["Option B (Token Prompt) - Streaming 복잡<br/>문제: Reference tokens을 매번 context에 포함해야 함 / Context window 소비 증가 / 긴 대화에서 context overflow 위험<br/>해결책: KV cache에 reference tokens의 attention 결과 저장 / Sliding window에서 reference 부분은 유지"]
+        TOP --> OA
+        TOP --> OB
+    end
 ```
 
 ### 6.3 Multi-Speaker Dialogue
 
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                Challenge: Multi-Speaker Dialogue Handling                    │
-├─────────────────────────────────────────────────────────────────────────────┤
-│                                                                             │
-│  시나리오: K-Moshi가 여러 화자 역할을 수행해야 할 때                        │
-│                                                                             │
-│  예: Customer service bot이 여러 persona 사용                               │
-│  - 친절한 상담원 A (여성)                                                  │
-│  - 전문 기술 상담원 B (남성)                                               │
-│                                                                             │
-│  ────────────────────────────────────────────────────────────────────────── │
-│                                                                             │
-│  해결책 1: Turn-level Speaker Switching                                     │
-│  ┌─────────────────────────────────────────────────────────────────────┐    │
-│  │  [Turn 1] Speaker A condition → Response in voice A                 │    │
-│  │  [Turn 2] Speaker B condition → Response in voice B                 │    │
-│  │  ...                                                                │    │
-│  │                                                                     │    │
-│  │  구현: turn 시작 시 speaker_condition 교체                          │    │
-│  └─────────────────────────────────────────────────────────────────────┘    │
-│                                                                             │
-│  해결책 2: Speaker ID Embedding                                             │
-│  ┌─────────────────────────────────────────────────────────────────────┐    │
-│  │  각 speaker reference에 ID 부여                                     │    │
-│  │  speaker_bank = {                                                   │    │
-│  │      "agent_A": speaker_encoder(ref_A),                            │    │
-│  │      "agent_B": speaker_encoder(ref_B),                            │    │
-│  │  }                                                                 │    │
-│  │                                                                     │    │
-│  │  Inference 시 ID로 speaker condition 선택                          │    │
-│  └─────────────────────────────────────────────────────────────────────┘    │
-│                                                                             │
-└─────────────────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    subgraph CH["Challenge: Multi-Speaker Dialogue Handling"]
+        TOP["시나리오: K-Moshi가 여러 화자 역할을 수행해야 할 때<br/>예: Customer service bot이 여러 persona 사용<br/>- 친절한 상담원 A (여성)<br/>- 전문 기술 상담원 B (남성)"]
+        S1["해결책 1: Turn-level Speaker Switching<br/>(Turn 1) Speaker A condition to Response in voice A<br/>(Turn 2) Speaker B condition to Response in voice B<br/>...<br/>구현: turn 시작 시 speaker_condition 교체"]
+        S2["해결책 2: Speaker ID Embedding<br/>각 speaker reference에 ID 부여<br/>speaker_bank = { agent_A: speaker_encoder(ref_A), agent_B: speaker_encoder(ref_B), }<br/>Inference 시 ID로 speaker condition 선택"]
+        TOP --> S1
+        TOP --> S2
+    end
 ```
 
 ---

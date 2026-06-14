@@ -742,38 +742,12 @@ max_steps: 50000
 
 ### 10.1 Phase Timeline
 
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                        K-MOSHI TRAINING ROADMAP                             │
-├─────────────────────────────────────────────────────────────────────────────┤
-│                                                                             │
-│  Phase 1: Pre-training (13K hours mono/stereo converted)                    │
-│  ════════════════════════════════════════════════════                       │
-│    Step 0 → 500:     Warmup (LR: 0 → 3e-5)                                 │
-│    Step 500 → 10K:   Constant LR (3e-5, same for Temp & Dep)               │
-│                                                                             │
-│    Checkpoints: every 500 steps                                             │
-│    Key Metrics: Loss < 6.0, WER improving                                   │
-│    Duration: ~20-30 hours (32x A100)                                        │
-│                                                                             │
-│  Phase 2: Fine-tuning (13K hours, different LR regime)                      │
-│  ════════════════════════════════════════════════════                       │
-│    Step 10K → 10.2K: Warmup (LR: 0 → 5e-6/1e-5)                            │
-│    Step 10.2K → 50K: Cosine decay to min_lr                                 │
-│                                                                             │
-│    Key: TempFormer=5e-6, DepFormer=1e-5 (2x ratio)                         │
-│    Checkpoints: every 1000 steps                                            │
-│    Key Metrics: WER < 30%, Loss < 4.0                                       │
-│    Duration: ~80-100 hours (32x A100)                                       │
-│                                                                             │
-│  Phase 3: High-Quality Post-training (Optional)                             │
-│  ═══════════════════════════════════════════════                            │
-│    Data: TTS-quality stereo recordings                                      │
-│    LR: 1e-6 / 2e-6 (ultra-conservative)                                    │
-│    Steps: 5,000 - 10,000                                                    │
-│    Target: WER < 15%, natural prosody                                       │
-│                                                                             │
-└─────────────────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    P1["Phase 1: Pre-training (13K hours mono/stereo converted)<br/>Step 0 to 500: Warmup (LR 0 to 3e-5)<br/>Step 500 to 10K: Constant LR (3e-5, same for Temp and Dep)<br/>Checkpoints: every 500 steps<br/>Key Metrics: Loss under 6.0, WER improving<br/>Duration: ~20-30 hours (32x A100)"]
+    P2["Phase 2: Fine-tuning (13K hours, different LR regime)<br/>Step 10K to 10.2K: Warmup (LR 0 to 5e-6/1e-5)<br/>Step 10.2K to 50K: Cosine decay to min_lr<br/>Key: TempFormer=5e-6, DepFormer=1e-5 (2x ratio)<br/>Checkpoints: every 1000 steps<br/>Key Metrics: WER under 30%, Loss under 4.0<br/>Duration: ~80-100 hours (32x A100)"]
+    P3["Phase 3: High-Quality Post-training (Optional)<br/>Data: TTS-quality stereo recordings<br/>LR: 1e-6 / 2e-6 (ultra-conservative)<br/>Steps: 5,000 - 10,000<br/>Target: WER under 15%, natural prosody"]
+    P1 --> P2 --> P3
 ```
 
 ### 10.2 Checkpoint Strategy

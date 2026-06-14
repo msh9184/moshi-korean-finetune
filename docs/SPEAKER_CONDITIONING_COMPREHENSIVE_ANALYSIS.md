@@ -20,41 +20,19 @@
 
 ### 1.1 Moshi 아키텍처 리뷰
 
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                        Moshi Dual-Transformer Architecture                   │
-├─────────────────────────────────────────────────────────────────────────────┤
-│                                                                              │
-│   Input: [Text_tokens, Audio_tokens(8 codebooks)]                           │
-│          ↓                                                                   │
-│   ┌────────────────────────────────────────────────────────────────────┐    │
-│   │           TEMPORAL TRANSFORMER (Main LM, 7B params)                 │    │
-│   │   ┌──────────────────────────────────────────────────────────────┐ │    │
-│   │   │ • 32 layers, 4096 dim, 32 heads                              │ │    │
-│   │   │ • Processes: time-axis sequential modeling                   │ │    │
-│   │   │ • Output: transformer_out [B, T, 4096]                       │ │    │
-│   │   │                                                              │ │    │
-│   │   │ ⭐ sum_condition 주입 위치:                                   │ │    │
-│   │   │    input_ = audio_emb + text_emb + sum_condition             │ │    │
-│   │   └──────────────────────────────────────────────────────────────┘ │    │
-│   └────────────────────────────────────────────────────────────────────┘    │
-│          ↓ transformer_out                                                   │
-│   ┌────────────────────────────────────────────────────────────────────┐    │
-│   │           DEPTH TRANSFORMER (Depformer, ~300M params)              │    │
-│   │   ┌──────────────────────────────────────────────────────────────┐ │    │
-│   │   │ • 6 layers, 1024 dim, 16 heads                               │ │    │
-│   │   │ • Processes: codebook-axis sequential modeling               │ │    │
-│   │   │ • Per-timestep: generates 8 codebook tokens autoregressively │ │    │
-│   │   │                                                              │ │    │
-│   │   │ ⚠️ 현재 conditioning 없음:                                    │ │    │
-│   │   │    depformer_input = transformer_in + token_in               │ │    │
-│   │   │    (no speaker condition)                                    │ │    │
-│   │   └──────────────────────────────────────────────────────────────┘ │    │
-│   └────────────────────────────────────────────────────────────────────┘    │
-│          ↓                                                                   │
-│   Output: [text_logits, audio_logits(8 codebooks)]                          │
-│                                                                              │
-└─────────────────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    IN["Input: [Text_tokens, Audio_tokens (8 codebooks)]"]
+    subgraph TT["TEMPORAL TRANSFORMER (Main LM, 7B params)"]
+        TTD["32 layers, 4096 dim, 32 heads<br/>Processes: time-axis sequential modeling<br/>Output: transformer_out [B, T, 4096]<br/>sum_condition 주입 위치:<br/>input_ = audio_emb + text_emb + sum_condition"]
+    end
+    subgraph DT["DEPTH TRANSFORMER (Depformer, ~300M params)"]
+        DTD["6 layers, 1024 dim, 16 heads<br/>Processes: codebook-axis sequential modeling<br/>Per-timestep: generates 8 codebook tokens autoregressively<br/>현재 conditioning 없음:<br/>depformer_input = transformer_in + token_in<br/>(no speaker condition)"]
+    end
+    OUT["Output: [text_logits, audio_logits (8 codebooks)]"]
+    IN --> TT
+    TT -->|"transformer_out"| DT
+    DT --> OUT
 ```
 
 ### 1.2 현재 구현 분석
@@ -185,31 +163,13 @@ def forward_depformer_training_v2(
 
 ### 1.5 논문 제안 관점에서의 Contribution
 
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                    Proposed: Dual-Level Speaker Conditioning                 │
-├─────────────────────────────────────────────────────────────────────────────┤
-│                                                                              │
-│   ┌──────────────────────────────────────────────────────────────────────┐  │
-│   │  Level 1: Temporal Transformer (Global Identity)                      │  │
-│   │  ──────────────────────────────────────────────────────────────────  │  │
-│   │  • Speaker embedding (ECAPA-TDNN) → sum_condition                    │  │
-│   │  • 화자의 전체적 음색, identity 전달                                   │  │
-│   │  • 모든 timestep에 일관되게 적용                                       │  │
-│   └──────────────────────────────────────────────────────────────────────┘  │
-│                              ↓                                               │
-│   ┌──────────────────────────────────────────────────────────────────────┐  │
-│   │  Level 2: Depth Transformer (Fine Acoustic Control)                   │  │
-│   │  ──────────────────────────────────────────────────────────────────  │  │
-│   │  • Acoustic style embedding → depformer_condition                    │  │
-│   │  • 발화 스타일, 억양, pitch variation 제어                            │  │
-│   │  • Codebook 1-3에 집중 적용 (speaker-specific codebooks)              │  │
-│   └──────────────────────────────────────────────────────────────────────┘  │
-│                                                                              │
-│   Novelty: Hierarchical speaker conditioning in dual-transformer            │
-│            architecture for speech-to-speech models                          │
-│                                                                              │
-└─────────────────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    L1["Level 1: Temporal Transformer (Global Identity)<br/>Speaker embedding (ECAPA-TDNN) to sum_condition<br/>화자의 전체적 음색, identity 전달<br/>모든 timestep에 일관되게 적용"]
+    L2["Level 2: Depth Transformer (Fine Acoustic Control)<br/>Acoustic style embedding to depformer_condition<br/>발화 스타일, 억양, pitch variation 제어<br/>Codebook 1-3에 집중 적용 (speaker-specific codebooks)"]
+    NOV["Novelty: Hierarchical speaker conditioning in dual-transformer<br/>architecture for speech-to-speech models"]
+    L1 --> L2
+    L2 --> NOV
 ```
 
 ---
@@ -220,49 +180,30 @@ def forward_depformer_training_v2(
 
 #### 방식 A: Speaker Encoder (Explicit Embedding)
 
-```
-Reference Audio (5-20s)
-         │
-         ▼
-┌─────────────────┐
-│  ECAPA-TDNN     │  Pre-trained speaker verification model
-│  Speaker Encoder│
-└────────┬────────┘
-         │ [B, 192]  Fixed-dimensional embedding
-         ▼
-┌─────────────────┐
-│ Projection Layer│  192 → 4096
-└────────┬────────┘
-         │ [B, 1, 4096]
-         ▼
-   sum_condition  → Transformer input에 더함
-
-특징:
-• Explicit: 화자 정보가 명시적 벡터로 분리됨
-• Compact: 고정 크기 (192-dim → 4096-dim projection)
-• Global: 전체 발화에 동일하게 적용
-• Pre-trained: Speaker verification task에서 학습됨
+```mermaid
+flowchart TD
+    REF["Reference Audio (5-20s)"]
+    ENC["ECAPA-TDNN Speaker Encoder<br/>(Pre-trained speaker verification model)"]
+    PROJ["Projection Layer<br/>192 to 4096"]
+    SUM["sum_condition<br/>(Transformer input에 더함)"]
+    REF --> ENC
+    ENC -->|"[B, 192] Fixed-dimensional embedding"| PROJ
+    PROJ -->|"[B, 1, 4096]"| SUM
+    NOTE["특징:<br/>Explicit: 화자 정보가 명시적 벡터로 분리됨<br/>Compact: 고정 크기 (192-dim to 4096-dim projection)<br/>Global: 전체 발화에 동일하게 적용<br/>Pre-trained: Speaker verification task에서 학습됨"]
+    SUM -.-> NOTE
 ```
 
 #### 방식 B: Audio Prompt (In-context Learning)
 
-```
-Reference Audio (3-20s) + Reference Text
-         │
-         ▼
-┌─────────────────┐
-│   Mimi Encoder  │  Neural audio codec
-└────────┬────────┘
-         │ [B, 8, T_ref]  Variable-length tokens
-         ▼
-   Sequence Prepend:
-   [REF_AUDIO_TOKENS | SEP | TARGET_TEXT | GEN_AUDIO]
-
-특징:
-• Implicit: 화자 정보가 토큰 시퀀스에 암묵적으로 포함
-• Variable: Reference 길이에 비례한 context 소비
-• Local: 각 reference의 specific 특성 포착
-• In-context: Transformer가 패턴을 학습해야 함
+```mermaid
+flowchart TD
+    REF["Reference Audio (3-20s) + Reference Text"]
+    ENC["Mimi Encoder<br/>(Neural audio codec)"]
+    SEQ["Sequence Prepend:<br/>[REF_AUDIO_TOKENS | SEP | TARGET_TEXT | GEN_AUDIO]"]
+    REF --> ENC
+    ENC -->|"[B, 8, T_ref] Variable-length tokens"| SEQ
+    NOTE["특징:<br/>Implicit: 화자 정보가 토큰 시퀀스에 암묵적으로 포함<br/>Variable: Reference 길이에 비례한 context 소비<br/>Local: 각 reference의 specific 특성 포착<br/>In-context: Transformer가 패턴을 학습해야 함"]
+    SEQ -.-> NOTE
 ```
 
 ### 2.2 정보 전달 관점 분석
@@ -346,46 +287,24 @@ Reference Audio (3-20s) + Reference Text
 
 #### 최신 트렌드: Hybrid Conditioning
 
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                    Hybrid Speaker Conditioning                               │
-├─────────────────────────────────────────────────────────────────────────────┤
-│                                                                              │
-│   Reference Audio (10-20s)                                                   │
-│         │                                                                    │
-│         ├──────────────────────────────────────────────────────────────┐    │
-│         │                                                              │    │
-│         ▼                                                              ▼    │
-│   ┌─────────────┐                                           ┌─────────────┐ │
-│   │Speaker Enc. │                                           │Mimi Encoder │ │
-│   │(ECAPA-TDNN) │                                           │(3-5s 추출) │ │
-│   └──────┬──────┘                                           └──────┬──────┘ │
-│          │ [B, 192]                                               │ [B,8,T]│
-│          ▼                                                        ▼        │
-│   ┌─────────────┐                                      Sequence Prepend    │
-│   │ Projection  │                                      [ref_tokens|input]  │
-│   └──────┬──────┘                                                 │        │
-│          │ [B, 1, 4096]                                           │        │
-│          ▼                                                        │        │
-│    sum_condition ──────────────────────────────┬──────────────────┘        │
-│          │                                     │                            │
-│          └─────────────────┬───────────────────┘                            │
-│                            ▼                                                │
-│                  ┌─────────────────┐                                        │
-│                  │    Transformer   │                                       │
-│                  └─────────────────┘                                        │
-│                                                                              │
-│   이점:                                                                      │
-│   • Global identity (Speaker Encoder) + Local detail (Audio Prompt)        │
-│   • 더 robust한 speaker similarity                                          │
-│   • Style의 fine-grained control 유지                                       │
-│                                                                              │
-│   단점:                                                                      │
-│   • 구현 복잡도 증가                                                         │
-│   • 두 정보원 간 balance 학습 필요                                           │
-│   • Context 소비 증가 (Prompt 부분)                                          │
-│                                                                              │
-└─────────────────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    REF["Reference Audio (10-20s)"]
+    SENC["Speaker Enc.<br/>(ECAPA-TDNN)"]
+    MENC["Mimi Encoder<br/>(3-5s 추출)"]
+    PROJ["Projection"]
+    SUM["sum_condition"]
+    SEQ["Sequence Prepend<br/>[ref_tokens | input]"]
+    TR["Transformer"]
+    REF --> SENC
+    REF --> MENC
+    SENC -->|"[B, 192]"| PROJ
+    PROJ -->|"[B, 1, 4096]"| SUM
+    MENC -->|"[B, 8, T]"| SEQ
+    SUM --> TR
+    SEQ --> TR
+    NOTE["이점:<br/>Global identity (Speaker Encoder) + Local detail (Audio Prompt)<br/>더 robust한 speaker similarity<br/>Style의 fine-grained control 유지<br/>단점:<br/>구현 복잡도 증가<br/>두 정보원 간 balance 학습 필요<br/>Context 소비 증가 (Prompt 부분)"]
+    TR -.-> NOTE
 ```
 
 #### FlashLabs Chroma 1.0의 선택 (2025.01)
@@ -665,102 +584,41 @@ def train_step_zero_shot(
 
 ### 4.2 아키텍처 상세
 
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                    FlashLabs Chroma 1.0 Architecture                         │
-├─────────────────────────────────────────────────────────────────────────────┤
-│                                                                              │
-│   Input: Speech/Text                                                         │
-│         │                                                                    │
-│         ▼                                                                    │
-│   ┌─────────────────────────────────────────────────────────────────────┐   │
-│   │  CHROMA REASONER (Frozen Qwen2-Audio encoder)                        │   │
-│   │  ────────────────────────────────────────────────────────────────── │   │
-│   │  • Cross-modal attention + TM-RoPE (Time-aligned Multimodal RoPE)   │   │
-│   │  • Speech ↔ Text semantic alignment                                 │   │
-│   │  • Output: Unified semantic representation                          │   │
-│   └──────────────────────────────┬──────────────────────────────────────┘   │
-│                                  │                                           │
-│   Reference Audio ───────────────┼──────────────────────────────────────┐   │
-│         │                        │                                      │   │
-│         ▼                        ▼                                      │   │
-│   ┌─────────────┐    ┌─────────────────────────────────────────────┐   │   │
-│   │ CSM-1B      │    │  CHROMA BACKBONE (1B LLaMA variant)          │   │   │
-│   │ Speaker Enc │───▶│  ───────────────────────────────────────────│   │   │
-│   └─────────────┘    │  • Input: [speaker_emb | ref_transcript |    │   │   │
-│                      │           reasoner_output | target_text]     │   │   │
-│                      │  • Output: Coarse acoustic codes (c⁰)        │   │   │
-│                      │  • 1:2 interleaved text-audio schedule       │   │   │
-│                      └──────────────────────────┬───────────────────┘   │   │
-│                                                 │                       │   │
-│                                                 ▼                       │   │
-│   ┌─────────────────────────────────────────────────────────────────┐   │   │
-│   │  CHROMA DECODER (100M LLaMA)                                     │   │   │
-│   │  ────────────────────────────────────────────────────────────── │   │   │
-│   │  • Frame-synchronous inference                                  │   │   │
-│   │  • Generates RVQ levels c¹:⁷ (residual codebooks)              │   │   │
-│   │  • No full text history needed                                  │   │   │
-│   └──────────────────────────────┬──────────────────────────────────┘   │   │
-│                                  │                                       │   │
-│                                  ▼                                       │   │
-│   ┌─────────────────────────────────────────────────────────────────┐   │   │
-│   │  CHROMA CODEC DECODER (Causal CNN, Mimi-style vocoder)          │   │   │
-│   │  ────────────────────────────────────────────────────────────── │   │   │
-│   │  • Streaming waveform generation                                │   │   │
-│   │  • 12.5 Hz → 24kHz upsampling                                   │   │   │
-│   └─────────────────────────────────────────────────────────────────┘   │   │
-│                                  │                                       │   │
-│                                  ▼                                       │   │
-│   Output: Synthesized Speech (personalized voice)                        │   │
-│                                                                          │   │
-└──────────────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    IN["Input: Speech/Text"]
+    REASONER["CHROMA REASONER (Frozen Qwen2-Audio encoder)<br/>Cross-modal attention + TM-RoPE (Time-aligned Multimodal RoPE)<br/>Speech to Text semantic alignment<br/>Output: Unified semantic representation"]
+    REFAUDIO["Reference Audio"]
+    CSM["CSM-1B<br/>Speaker Enc"]
+    BACKBONE["CHROMA BACKBONE (1B LLaMA variant)<br/>Input: [speaker_emb | ref_transcript | reasoner_output | target_text]<br/>Output: Coarse acoustic codes (c0)<br/>1:2 interleaved text-audio schedule"]
+    DECODER["CHROMA DECODER (100M LLaMA)<br/>Frame-synchronous inference<br/>Generates RVQ levels c1 to c7 (residual codebooks)<br/>No full text history needed"]
+    CODEC["CHROMA CODEC DECODER (Causal CNN, Mimi-style vocoder)<br/>Streaming waveform generation<br/>12.5 Hz to 24kHz upsampling"]
+    OUT["Output: Synthesized Speech (personalized voice)"]
+    IN --> REASONER
+    REASONER --> BACKBONE
+    REFAUDIO --> CSM
+    CSM --> BACKBONE
+    BACKBONE --> DECODER
+    DECODER --> CODEC
+    CODEC --> OUT
 ```
 
 ### 4.3 Speaker Conditioning 메커니즘 상세
 
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│              Chroma Speaker Conditioning (Hybrid Approach)                   │
-├─────────────────────────────────────────────────────────────────────────────┤
-│                                                                              │
-│   Reference Audio (Few seconds)                                              │
-│         │                                                                    │
-│         ├───────────────────────────────────────────────────────────┐       │
-│         │                                                           │       │
-│         ▼                                                           ▼       │
-│   ┌─────────────┐                                        ┌─────────────────┐│
-│   │ CSM-1B      │                                        │ Transcript      ││
-│   │(Speaker Enc)│                                        │ Embedding       ││
-│   └──────┬──────┘                                        └────────┬────────┘│
-│          │ Speaker Embedding                                      │         │
-│          │                                                        │         │
-│          └────────────────────────┬───────────────────────────────┘         │
-│                                   │                                          │
-│                                   ▼                                          │
-│                    ┌─────────────────────────────┐                           │
-│                    │   Concatenated Prompt       │                           │
-│                    │ [spk_emb | ref_transcript]  │                           │
-│                    └──────────────┬──────────────┘                           │
-│                                   │                                          │
-│                                   ▼ Prepend to input sequence                │
-│                    ┌─────────────────────────────────────────────────┐      │
-│                    │ [prompt | reasoner_out | target_text]           │      │
-│                    └─────────────────────────────────────────────────┘      │
-│                                                                              │
-│   특징:                                                                      │
-│   ──────                                                                     │
-│   1. Speaker Embedding (CSM-1B): Global identity 전달                       │
-│   2. Reference Transcript Embedding: Phonetic/style pattern 전달            │
-│   3. Prepend 방식: In-context learning 활용                                 │
-│   4. Direct Conditioning: Backbone 전체에 speaker 정보 전달                 │
-│                                                                              │
-│   Moshi와의 차이:                                                            │
-│   ─────────────────                                                          │
-│   • Moshi: sum_condition (add to all timesteps)                             │
-│   • Chroma: Prepend prompt (sequence prefix)                                │
-│   • Chroma는 Hybrid (embedding + transcript prompt)                         │
-│                                                                              │
-└─────────────────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    REF["Reference Audio (Few seconds)"]
+    CSM["CSM-1B<br/>(Speaker Enc)"]
+    TRANS["Transcript<br/>Embedding"]
+    CONCAT["Concatenated Prompt<br/>[spk_emb | ref_transcript]"]
+    PREPEND["Prepend to input sequence:<br/>[prompt | reasoner_out | target_text]"]
+    REF --> CSM
+    REF --> TRANS
+    CSM -->|"Speaker Embedding"| CONCAT
+    TRANS --> CONCAT
+    CONCAT --> PREPEND
+    NOTE["특징:<br/>1. Speaker Embedding (CSM-1B): Global identity 전달<br/>2. Reference Transcript Embedding: Phonetic/style pattern 전달<br/>3. Prepend 방식: In-context learning 활용<br/>4. Direct Conditioning: Backbone 전체에 speaker 정보 전달<br/>Moshi와의 차이:<br/>Moshi: sum_condition (add to all timesteps)<br/>Chroma: Prepend prompt (sequence prefix)<br/>Chroma는 Hybrid (embedding + transcript prompt)"]
+    PREPEND -.-> NOTE
 ```
 
 ### 4.4 학습 전략
@@ -834,72 +692,26 @@ def train_step_zero_shot(
 
 ### 5.1 최종 아키텍처 제안
 
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                K-Moshi Zero-Shot Speaker Conditioning Architecture           │
-├─────────────────────────────────────────────────────────────────────────────┤
-│                                                                              │
-│   ┌─────────────────────────────────────────────────────────────────────┐   │
-│   │                    REFERENCE PROCESSING                              │   │
-│   │   ─────────────────────────────────────────────────────────────────  │   │
-│   │                                                                      │   │
-│   │   Reference Audio (5-20s from same speaker)                         │   │
-│   │         │                                                            │   │
-│   │         ├────────────────────────────────────────┐                   │   │
-│   │         │                                        │                   │   │
-│   │         ▼                                        ▼                   │   │
-│   │   ┌─────────────┐                        ┌─────────────┐             │   │
-│   │   │ ECAPA-TDNN  │                        │ Mimi Encoder│             │   │
-│   │   │ (Frozen)    │                        │ (Frozen)    │             │   │
-│   │   └──────┬──────┘                        └──────┬──────┘             │   │
-│   │          │ [B, 192]                            │ [B, 8, T_prompt]    │   │
-│   │          │ Global Identity                     │ Local Details       │   │
-│   │          │                                     │ (optional, 3-5s)    │   │
-│   │          ▼                                     │                      │   │
-│   │   ┌─────────────────┐                         │                      │   │
-│   │   │  Projection     │                         │                      │   │
-│   │   │  (192 → 4096)   │                         │                      │   │
-│   │   └────────┬────────┘                         │                      │   │
-│   │            │ [B, 1, 4096]                      │                      │   │
-│   │            │                                   │                      │   │
-│   └────────────┼───────────────────────────────────┼──────────────────────┘   │
-│                │                                   │                          │
-│                │       sum_condition               │    prepend (optional)    │
-│                │                                   │                          │
-│   ┌────────────┼───────────────────────────────────┼──────────────────────┐   │
-│   │            ▼                                   ▼                       │   │
-│   │   ┌─────────────────────────────────────────────────────────────┐    │   │
-│   │   │          TEMPORAL TRANSFORMER (7B, Full Finetuning)          │    │   │
-│   │   │   ─────────────────────────────────────────────────────────  │    │   │
-│   │   │   input = audio_emb + text_emb + speaker_condition           │    │   │
-│   │   │   (+ optional audio_prompt prepend)                          │    │   │
-│   │   │                                                              │    │   │
-│   │   │   • Global speaker identity conditioning                     │    │   │
-│   │   │   • Time-axis sequential modeling                            │    │   │
-│   │   └──────────────────────────┬───────────────────────────────────┘    │   │
-│   │                              │ transformer_out [B, T, 4096]           │   │
-│   │                              │                                        │   │
-│   │                              ▼                                        │   │
-│   │   ┌─────────────────────────────────────────────────────────────┐    │   │
-│   │   │          DEPTH TRANSFORMER (Depformer, Full Finetuning)      │    │   │
-│   │   │   ─────────────────────────────────────────────────────────  │    │   │
-│   │   │   ⭐ NEW: Codebook-specific acoustic conditioning            │    │   │
-│   │   │                                                              │    │   │
-│   │   │   for cb_index in range(8):                                  │    │   │
-│   │   │       depformer_input = token_in + transformer_in            │    │   │
-│   │   │       if cb_index in [1, 2, 3]:  # Speaker-specific codebooks│    │   │
-│   │   │           depformer_input += acoustic_style_condition        │    │   │
-│   │   │                                                              │    │   │
-│   │   │   • Fine-grained acoustic control                            │    │   │
-│   │   │   • Per-codebook styling (optional advanced feature)         │    │   │
-│   │   └──────────────────────────┬───────────────────────────────────┘    │   │
-│   │                              │                                        │   │
-│   │                              ▼                                        │   │
-│   │   Output: [text_logits, audio_logits (8 codebooks)]                  │   │
-│   │                                                                       │   │
-│   └───────────────────────────────────────────────────────────────────────┘   │
-│                                                                              │
-└──────────────────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    subgraph RP["REFERENCE PROCESSING"]
+        REF["Reference Audio (5-20s from same speaker)"]
+        ECAPA["ECAPA-TDNN (Frozen)"]
+        MIMI["Mimi Encoder (Frozen)"]
+        PROJ["Projection (192 to 4096)"]
+        REF --> ECAPA
+        REF --> MIMI
+        ECAPA -->|"[B, 192] Global Identity"| PROJ
+    end
+    subgraph MODEL["K-Moshi Model"]
+        TT["TEMPORAL TRANSFORMER (7B, Full Finetuning)<br/>input = audio_emb + text_emb + speaker_condition<br/>(+ optional audio_prompt prepend)<br/>Global speaker identity conditioning<br/>Time-axis sequential modeling"]
+        DT["DEPTH TRANSFORMER (Depformer, Full Finetuning)<br/>NEW: Codebook-specific acoustic conditioning<br/>for cb_index in range(8): depformer_input = token_in + transformer_in<br/>if cb_index in [1, 2, 3]: depformer_input += acoustic_style_condition<br/>Fine-grained acoustic control<br/>Per-codebook styling (optional advanced feature)"]
+        OUT["Output: [text_logits, audio_logits (8 codebooks)]"]
+        TT -->|"transformer_out [B, T, 4096]"| DT
+        DT --> OUT
+    end
+    PROJ -->|"[B, 1, 4096] sum_condition"| TT
+    MIMI -->|"[B, 8, T_prompt] Local Details (optional, 3-5s) prepend (optional)"| TT
 ```
 
 ### 5.2 구현 Phase 계획
