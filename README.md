@@ -1,73 +1,65 @@
-# 🇰🇷 moshi-korean-finetune
+# moshi-korean-finetune
 
-**Korean full-duplex spoken-dialogue fine-tuning on [Kyutai Moshi](https://github.com/kyutai-labs/moshi).**
-A research recipe that adapts Moshi's real-time, full-duplex architecture to Korean — with a pluggable LM backbone, zero-shot speaker conditioning, Korean tokenizer tooling, a two-stage data pipeline, and an advanced monitoring/eval suite. A companion [`serving/`](serving/) overlay takes the trained model all the way to a live browser demo.
+Korean full-duplex spoken-dialogue fine-tuning on [Kyutai Moshi](https://github.com/kyutai-labs/moshi). This is a research recipe that adapts Moshi's real-time, full-duplex architecture to Korean, with a pluggable LM backbone, zero-shot speaker conditioning, Korean tokenizer tooling, a two-stage data pipeline, and a monitoring/evaluation suite. A companion [`serving/`](serving/) overlay takes a trained model to a live browser demo.
 
-<p>
-<img alt="license" src="https://img.shields.io/badge/license-Apache--2.0-blue">
-<img alt="python" src="https://img.shields.io/badge/python-3.10%2B-blue">
-<img alt="base" src="https://img.shields.io/badge/base-Kyutai%20Moshi-ff5a5f">
-<img alt="status" src="https://img.shields.io/badge/status-research%20PoC-orange">
-</p>
+![license](https://img.shields.io/badge/license-Apache--2.0-blue) ![python](https://img.shields.io/badge/python-3.10%2B-blue) ![base](https://img.shields.io/badge/base-Kyutai%20Moshi-555)
 
-> Personal research / proof-of-concept. Built on [kyutai-labs/moshi-finetune](https://github.com/kyutai-labs/moshi-finetune), inspired by [J-Moshi](https://arxiv.org/abs/2506.02979). All base models/datasets are public (Kyutai Moshi/Mimi on Hugging Face; AI-Hub / NIKL Korean corpora). Config paths are `/path/to/...` placeholders. No proprietary models or data are included.
+> Personal research / proof-of-concept. Built on [kyutai-labs/moshi-finetune](https://github.com/kyutai-labs/moshi-finetune); inspired by [J-Moshi](https://arxiv.org/abs/2506.02979). All base models and datasets are public (Kyutai Moshi/Mimi on Hugging Face; AI-Hub / NIKL Korean corpora). Config paths are `/path/to/...` placeholders. No proprietary models or data are included.
 
----
+## Overview
 
-## Why Korean Moshi?
+Moshi represents a conversation as two parallel audio streams plus an inner "monologue" text stream, which is what enables natural full-duplex turn-taking (overlap, backchannel, interruption). This repository explores bringing that architecture to Korean: tokenization, Korean dialogue data (real and synthetic), speaker conditioning for voice control, and training recipes that run on a single node or scale out with FSDP/DDP.
 
-Moshi models a conversation as **two parallel audio streams** plus an inner **"monologue" text stream**, enabling natural full-duplex turn-taking (overlap, backchannel, interruption). This repo explores what it takes to bring that to Korean: tokenization, Korean dialogue data (real + synthetic), speaker conditioning for voice control, and training recipes that fit a single node or scale out with FSDP/DDP.
+## Key features
 
-## ✨ Key features
+- Pluggable LM backbone: keep Moshi's native LM, or swap in any Hugging Face causal LM via an Abstract-Factory backbone layer, with a dimension adapter bridging the LM to Moshi's depformer.
+- Zero-shot speaker conditioning: speaker encoder (ECAPA-TDNN / W2v-BERT 2.0 SV) + conditioner + VALL-E-style audio prompting, with unit tests.
+- Korean tokenizer tooling: initialize and extend Moshi for Korean; SentencePiece/BBPE utilities.
+- Two-stage data pipeline: real dialogue to Lhotse shards (`data_preparation/`), plus synthetic dialogue generation (`data_preparation_stage2/`, partial).
+- Monitoring and evaluation: alignment / audio-quality / dialogue / semantic monitors, sample savers, BLEU, and enhanced metrics.
+- Staged training: stage-1 pretraining and stage-2 speaker conditioning, FSDP/DDP, with a cosine-warmup scheduler and a stage-aware pretrained loader.
+- End-to-end serving: see [`serving/`](serving/) for fuse-LoRA -> Rust backend -> live demo.
 
-- **Pluggable LM backbone** — keep Moshi's native LM, or swap in any **Hugging Face causal LM** via an Abstract-Factory backbone layer + automatic **dimension adapter** bridging the LM to Moshi's depformer.
-- **Zero-shot speaker conditioning** — speaker-encoder (ECAPA-TDNN / W2v-BERT 2.0 SV) + conditioner + VALL-E-style audio prompting, with unit tests.
-- **Korean tokenizer tooling** — initialize/extend Moshi for Korean, SentencePiece/BBPE utilities.
-- **Two-stage data pipeline** — `data_preparation/` (real dialogue → Lhotse shards) + `data_preparation_stage2/` (synthetic dialogue, partial/experimental).
-- **Advanced monitoring & evaluation** — alignment / audio-quality / dialogue / semantic monitors, sample savers, BLEU, enhanced metrics (13 modules).
-- **Staged training** — stage-1 pretraining + stage-2 speaker conditioning, FSDP/DDP, with a cosine-warmup scheduler and a stage-aware pretrained loader.
-- **End-to-end serving** — [`serving/`](serving/): fuse LoRA → Rust backend → live Korean voice demo.
+## What is different from upstream moshi-finetune
 
-## 🆚 What's different from upstream moshi-finetune
-
-| Capability | Upstream | **This repo** |
+| Capability | Upstream | This repo |
 |---|---|---|
-| LM backbone | Moshi LM only | ✅ pluggable (Moshi or any HF causal LM) + dimension adapter |
-| Speaker conditioning | — | ✅ zero-shot encoder/conditioner/audio-prompt + tests |
-| Korean tokenizer | — | ✅ init/extend + SentencePiece/BBPE tooling |
-| Data pipeline | minimal loader | ✅ 2-stage (real Lhotse-shar + synthetic) |
-| Monitoring/eval | basic logging | ✅ 13-module suite (alignment/audio/dialogue/semantic) |
-| Scheduler / staged load | inline | ✅ cosine-warmup + stage-aware pretrained loader |
-| Serving | — | ✅ `serving/` Rust backend overlay + LoRA-fuse bridge |
+| LM backbone | Moshi LM only | pluggable (Moshi or any HF causal LM) + dimension adapter |
+| Speaker conditioning | — | zero-shot encoder / conditioner / audio-prompt + tests |
+| Korean tokenizer | — | init/extend + SentencePiece/BBPE tooling |
+| Data pipeline | minimal loader | two-stage (real Lhotse-shar + synthetic) |
+| Monitoring / eval | basic logging | multi-module suite (alignment / audio / dialogue / semantic) |
+| Scheduler / staged load | inline | cosine-warmup + stage-aware pretrained loader |
+| Serving | — | `serving/` Rust-backend overlay + LoRA-fuse bridge |
 
-## 🏗️ Architecture (pluggable backbone)
+## Architecture (pluggable backbone)
 
 ```
-            ┌──────────────────────── LMModelWrapper ────────────────────────┐
-            │                                                                 │
-  text/audio│   ┌───────────────── AbstractBackbone ─────────────────┐       │
-  tokens  ──┼──▶│  MoshiBackbone (4096)   |   HFLMBackbone (e.g. 3072) │      │
-            │   └───────────────────────────────┬─────────────────────┘      │
-            │                                    │ DimensionAdapter (↔4096)   │
-            │                                    ▼                            │
-            │                    shared Moshi temporal transformer + depformer │
-            │                                    │                            │
-            └────────────────────────────────────┼────────────────────────────┘
-                                                 ▼
-                                  Mimi codec (audio tokens, full-duplex)
+            +------------------------- LMModelWrapper -------------------------+
+            |                                                                  |
+  text/audio|   +----------------- AbstractBackbone ------------------+        |
+  tokens  --+-->|  MoshiBackbone (4096)   |   HFLMBackbone (e.g. 3072) |       |
+            |   +----------------------------------+-------------------+       |
+            |                                      | DimensionAdapter (<->4096)|
+            |                                      v                           |
+            |                  shared Moshi temporal transformer + depformer   |
+            |                                      |                           |
+            +--------------------------------------+---------------------------+
+                                                   v
+                                    Mimi codec (audio tokens, full-duplex)
 ```
 
-## 📁 Repository layout
+## Repository layout
 
 ```
 finetune/
   backbone/      # pluggable LM backbone: base / factory / adapters / config
-                 #   moshi_backbone.py + hf_lm_backbone.py
+                 # moshi_backbone.py + hf_lm_backbone.py
   modules/       # speaker conditioning: speaker_encoder / conditioner / audio_prompt
   monitoring/    # alignment / audio-quality / dialogue / semantic monitors + loggers
   data/          # dataset + interleaver (inner-monologue + dual audio streams)
   pretrained_loader.py, scheduler.py, eval.py, loss.py, args.py, ...
-data_preparation/         # stage-1: real Korean dialogue → Lhotse shards
+data_preparation/         # stage-1: real Korean dialogue -> Lhotse shards
 data_preparation_stage2/  # stage-2: synthetic dialogue (partial)
 example/                  # korean_*.yaml training/eval configs (stages, FSDP/DDP)
 tools/                    # Korean tokenizer init / wrappers / conversion
@@ -77,85 +69,118 @@ docs/                     # architecture / speaker-conditioning / tokenizer / re
 train.py, annotate.py
 ```
 
-## ⚙️ Installation
+## Requirements
+
+- Linux with an NVIDIA GPU and CUDA 12.x; PyTorch 2.4+.
+- Python 3.10+.
+- Full fine-tuning is multi-GPU (the example FSDP configs target an 8x A100 80GB node); single-GPU runs are possible with smaller batch sizes / LoRA.
+
+## Installation
 
 ```bash
+# 1. Install this package
 pip install -e .
-# REQUIRED: install moshi / sphn / sentencepiece (pulled in --no-deps on a GPU box)
-bash scripts/setup_environment.sh      # uses the public PyTorch index
+
+# 2. Install moshi / sphn / sentencepiece (pulled in --no-deps on a GPU box)
+bash scripts/setup_environment.sh            # smart install (skips what already exists)
+# Options: --check (verify only), --force (reinstall moshi/sphn), --minimal
 ```
 
-> `pip install -e .` alone is not enough to `import moshi`; run `scripts/setup_environment.sh` (or install `moshi` manually). Base Moshi/Mimi weights come from the Kyutai Hugging Face repos.
+`pip install -e .` alone is not enough to `import moshi`; you must run `scripts/setup_environment.sh` (or install `moshi` manually). It uses the public PyTorch index. Base Moshi/Mimi weights are downloaded from the Kyutai Hugging Face repositories.
 
-## 🚀 Quick start
+## Running the recipe (step by step)
+
+**Step 1 - Initialize a Korean-extended Moshi checkpoint.** This downloads the base Moshi model and extends it for Korean (new tokenizer embeddings and, optionally, the user audio stream).
 
 ```bash
-# 1) Initialize a Korean-extended Moshi checkpoint
-python -m tools.init_korean_moshi --save_dir ./models/k-moshi-init --extend_modules_for_user_stream
+python -m tools.init_korean_moshi \
+  --save_dir ./models/k-moshi-init \
+  --moshi_lm_repo kyutai/moshiko-pytorch-bf16 \
+  --extend_modules_for_user_stream \
+  --init_text_embeddings
+```
 
-# 2) Stage-1 data prep: real Korean dialogue → Lhotse shards
-python -m data_preparation.scripts.run_phase1 --parallel
-python -m data_preparation.scripts.run_phase2 --help
+**Step 2 - Prepare Korean dialogue data (stage 1).** Convert real dialogue corpora into Moshi-ready Lhotse shards. Edit `data_preparation/config.py` (or its example config) to point at your data first; every dataset path is a `/path/to/...` placeholder.
 
-# 3) Stage-1 pretraining
+```bash
+python -m data_preparation.scripts.run_phase1 --parallel    # CPU: alignment, speaker selection, stereo
+python -m data_preparation.scripts.run_phase2 --help        # GPU: encode to shards
+```
+
+Stage 2 (optional) synthesizes additional Korean dialogue; see `data_preparation_stage2/` (partial pipeline).
+
+**Step 3 - Configure training.** Pick a config under `example/` and set its model/data paths (init checkpoint from Step 1, shards from Step 2). Choose the backbone with `backbone.type` (`moshi` is the default; see "Backbone selection").
+
+**Step 4 - Stage-1 pretraining.**
+
+```bash
 python train.py example/korean_moshi_stage1_pretrain.yaml
+```
 
-# 4) Stage-2 speaker conditioning (loads stage-1 weights)
+**Step 5 - Stage-2 speaker conditioning** (loads the stage-1 weights via the pretrained loader).
+
+```bash
 python train.py example/korean_moshi_stage2_speaker.yaml
+```
 
-# Multi-GPU FSDP
-torchrun --nproc_per_node=4 train.py example/korean_v4_fsdp.yaml
+**Step 6 - Evaluation.**
 
-# Speaker-conditioning evaluation
+```bash
 python train.py example/korean_eval_speaker_cond.yaml
 ```
 
-## 🧩 Backbone selection
+Multi-GPU training uses `torchrun` with the FSDP configs:
 
-- **`moshi`** (default, validated) — Moshi's native LM.
-- **`hf_lm`** (experimental, Phase 2) — any Hugging Face causal LM; set `hf_lm.model_path` to a checkpoint, and the dimension adapter auto-bridges mismatched widths.
+```bash
+torchrun --nproc_per_node=4 train.py example/korean_v4_fsdp.yaml
+```
+
+## Backbone selection
+
+- `moshi` (default, validated): Moshi's native LM.
+- `hf_lm` (experimental, Phase 2): any Hugging Face causal LM. Set `hf_lm.model_path` to a checkpoint; the dimension adapter auto-bridges mismatched hidden sizes.
 
 ```yaml
 # example/korean_backbone_hf_lm.yaml
 backbone:
   type: hf_lm
   hf_lm:
-    model_path: /path/to/hf-causal-lm   # a Mistral-architecture model, etc.
+    model_path: /path/to/hf-causal-lm   # e.g. a Mistral-architecture model
 ```
 
-## 🎚️ Speaker conditioning
+## Speaker conditioning
 
-Enable zero-shot voice control via `finetune/modules/`: choose a speaker encoder (`ecapa` / `w2v_bert2` / `dummy`) and an audio-prompt mode. See `docs/SPEAKER_CONDITIONING_*`.
+Enable zero-shot voice control via `finetune/modules/`: choose a speaker encoder (`ecapa` / `w2v_bert2` / `dummy`) and an audio-prompt mode. See `docs/SPEAKER_CONDITIONING_SYSTEM_ARCHITECTURE.md`.
 
-## 🔊 Serving & live demo
+## Serving and live demo
 
-[`serving/`](serving/) completes the **train → export → serve → demo** loop: fuse the LoRA adapter into a Rust/Candle-loadable checkpoint (`import_rust_lora.py`), launch the Kyutai Moshi **Rust backend** (`serve_korean_moshi.sh`), and connect a Korean web client for live full-duplex voice chat. It also adds an optional **pluggable Rust backbone** (Mistral-architecture + dimension adapter). See [`serving/README.md`](serving/README.md).
+[`serving/`](serving/) completes the train -> export -> serve -> demo loop: fuse the LoRA adapter into a Rust/Candle-loadable checkpoint (`import_rust_lora.py`), launch the Kyutai Moshi Rust backend (`serve_korean_moshi.sh`), and connect a Korean web client for live full-duplex voice chat. It also adds an optional pluggable Rust backbone (Mistral-architecture + dimension adapter). See [`serving/README.md`](serving/README.md).
 
-## 📈 Results
+## Results
 
-Illustrative training-loss curve (LoRA vs LoRA + embedding fine-tuning, to ~2k steps):
+Illustrative training-loss curve (LoRA vs LoRA + embedding fine-tuning, to about 2k steps):
 
 ![Training loss curve](images/train_curve_example.png)
 
-## 📚 Documentation
+## Documentation
 
-- [Architecture proposal](docs/K-MOSHI_ARCHITECTURE_PROPOSAL.md) · [Full-duplex analysis](docs/FULL_DUPLEX_ARCHITECTURE_ANALYSIS.md)
-- [Speaker conditioning](docs/SPEAKER_CONDITIONING_SYSTEM_ARCHITECTURE.md) · [Zero-shot spec](docs/ZERO_SHOT_SPEAKER_CONDITIONING_SPECIFICATION.md)
-- [Korean tokenizer guide](docs/KOREAN_TOKENIZER_GUIDE.md) · [Training guide](docs/TRAINING_GUIDE.md) · [Recipe analysis](docs/TRAINING_RECIPE_ANALYSIS.md)
-- [Enhanced eval metrics](docs/ENHANCED_EVAL_METRICS_SPEC.md)
+- Architecture: `docs/K-MOSHI_ARCHITECTURE_PROPOSAL.md`, `docs/FULL_DUPLEX_ARCHITECTURE_ANALYSIS.md`
+- Speaker conditioning: `docs/SPEAKER_CONDITIONING_SYSTEM_ARCHITECTURE.md`, `docs/ZERO_SHOT_SPEAKER_CONDITIONING_SPECIFICATION.md`
+- Tokenizer and training: `docs/KOREAN_TOKENIZER_GUIDE.md`, `docs/TRAINING_GUIDE.md`, `docs/TRAINING_RECIPE_ANALYSIS.md`
+- Evaluation: `docs/ENHANCED_EVAL_METRICS_SPEC.md`
 
-## 🙏 Acknowledgements
+## Acknowledgements
 
-[Kyutai Moshi & moshi-finetune](https://github.com/kyutai-labs/moshi) (base architecture & framework) and [J-Moshi](https://arxiv.org/abs/2506.02979) (Japanese adaptation that inspired this Korean effort).
+[Kyutai Moshi and moshi-finetune](https://github.com/kyutai-labs/moshi) (base architecture and framework) and [J-Moshi](https://arxiv.org/abs/2506.02979) (the Japanese adaptation that inspired this Korean effort).
 
-## 📜 License & citation
+## License and citation
 
-Apache-2.0 (see [LICENSE](LICENSE)), matching upstream moshi-finetune.
+Apache-2.0 (see `LICENSE`), matching upstream moshi-finetune.
 
 ```bibtex
 @techreport{kyutai2024moshi,
   title  = {Moshi: a speech-text foundation model for real-time dialogue},
-  author = {D\'efossez, Alexandre and Mazar\'e, Laurent and Orsini, Manu and others},
+  author = {Defossez, Alexandre and Mazare, Laurent and Orsini, Manu and others},
   institution = {Kyutai}, year = {2024}
 }
 ```

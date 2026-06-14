@@ -109,7 +109,7 @@ speaker:
 
 ## 3. Speaker Encoder 옵션
 
-### 3.1 W2v-BERT 2.0 SV ⭐ 권장
+### 3.1 W2v-BERT 2.0 SV  권장
 
 - **출력 차원**: 256
 - **성능**: VoxCeleb1-O에서 **0.14% EER** (State-of-the-Art)

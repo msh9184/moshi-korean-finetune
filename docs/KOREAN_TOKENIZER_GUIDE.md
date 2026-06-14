@@ -106,7 +106,7 @@ moshi_paths:
   moshi_path: '/path/to/model'
   mimi_path: '/path/to/model'
 
-  # ⬇️ 이 줄만 수정하면 됩니다!
+  # 이 줄만 수정하면 됩니다!
   tokenizer_path: '/path/to/workspace'
 
   config_path: '/path/to/model'

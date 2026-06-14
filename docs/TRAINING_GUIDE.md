@@ -80,11 +80,11 @@ python scripts/prepare_training_data.py \
 # ============================================================
 # Validation Results
 # ============================================================
-#   total: 15,289
-#   valid: 15,250
-#   invalid: 39
-#   total_words: 2,500,000
-#   total_duration_hours: 839.00h
+# total: 15,289
+# valid: 15,250
+# invalid: 39
+# total_words: 2,500,000
+# total_duration_hours: 839.00h
 ```
 
 ### 2.2 학습용 JSONL 생성

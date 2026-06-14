@@ -67,7 +67,7 @@ def forward_text(self, sequence, sum_condition=None, cross_attention_src=None):
     # 1. Embedding 합산
     input_ = audio_emb + text_emb
 
-    # 2. ⭐ Speaker Conditioning (현재 지원됨)
+    # 2.  Speaker Conditioning (현재 지원됨)
     if sum_condition is not None:
         input_ = input_ + sum_condition.to(input_)
 
@@ -96,7 +96,7 @@ def forward_depformer_training(self, sequence, transformer_out):
         else:
             token_in = self.depformer_emb[cb_index - 1](sequence[:, cb_index + offset - 1])
 
-        # ⚠️ NO speaker condition!
+        # NO speaker condition!
         depformer_inputs.append(token_in + transformer_in)
 
     depformer_output = self.depformer(depformer_input)
@@ -129,7 +129,7 @@ def forward_depformer_training(
 
         depformer_input = token_in + transformer_in
 
-        # ⭐ NEW: Depformer-level speaker conditioning
+        # NEW: Depformer-level speaker conditioning
         if depformer_condition is not None:
             depformer_input = depformer_input + depformer_condition
 
@@ -159,7 +159,7 @@ def forward_depformer_training_v2(
 
         depformer_input = token_in + transformer_in
 
-        # ⭐ Codebook-specific conditioning
+        # Codebook-specific conditioning
         # Codebook 0: Semantic (less speaker-specific)
         # Codebook 1-7: Acoustic (more speaker-specific)
         if codebook_conditions and codebook_conditions[cb_index] is not None:

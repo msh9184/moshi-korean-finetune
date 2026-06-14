@@ -154,20 +154,20 @@ Data:
 # J-Moshi: 512 total batch / 128 GPUs = 4 per GPU
 #
 # K-Moshi 목표: 비슷한 effective batch size 유지
-#   - 32 GPUs × 4 per GPU = 128 (너무 작음)
-#   - Gradient Accumulation으로 보상
+# - 32 GPUs × 4 per GPU = 128 (너무 작음)
+# - Gradient Accumulation으로 보상
 #
 # 권장: batch_size=4, num_microbatches=4 (grad accum)
-#   → Effective batch = 32 × 4 × 4 = 512 (J-Moshi와 동일!)
+# → Effective batch = 32 × 4 × 4 = 512 (J-Moshi와 동일!)
 #
 # A100 80GB 메모리 예상:
-#   - 7B model (bf16): ~14GB
-#   - Optimizer states (Adam): ~28GB
-#   - Activations (with checkpointing): ~20GB per sample
-#   - 4 samples: ~80GB (꽉 찰 수 있음)
+# - 7B model (bf16): ~14GB
+# - Optimizer states (Adam): ~28GB
+# - Activations (with checkpointing): ~20GB per sample
+# - 4 samples: ~80GB (꽉 찰 수 있음)
 #
 # 안전한 설정: batch_size=2, num_microbatches=8
-#   → Effective batch = 32 × 2 × 8 = 512
+# → Effective batch = 32 × 2 × 8 = 512
 # ─────────────────────────────────────────────────────────────────────────────
 
 Batch:
@@ -182,8 +182,8 @@ Batch:
 # J-Moshi: 2.7분 = 162초 (2,048 tokens at 12.5Hz)
 #
 # 권장: duration_sec=160 (≈2,048 tokens)
-#   - J-Moshi와 동일한 컨텍스트 길이
-#   - 긴 대화 패턴 학습 가능
+# - J-Moshi와 동일한 컨텍스트 길이
+# - 긴 대화 패턴 학습 가능
 #
 # 메모리 부족 시: duration_sec=80 (≈1,024 tokens)
 # ─────────────────────────────────────────────────────────────────────────────
@@ -197,9 +197,9 @@ Sequence:
 # ─────────────────────────────────────────────────────────────────────────────
 #
 # J-Moshi는 Llama 2 스타일 AdamW 사용:
-#   - β1=0.9, β2=0.95 (standard: 0.9, 0.999)
-#   - 낮은 β2는 gradient의 빠른 적응에 유리
-#   - 음성 모델에서 검증된 설정
+# - β1=0.9, β2=0.95 (standard: 0.9, 0.999)
+# - 낮은 β2는 gradient의 빠른 적응에 유리
+# - 음성 모델에서 검증된 설정
 # ─────────────────────────────────────────────────────────────────────────────
 
 Optimizer:
@@ -217,8 +217,8 @@ Optimizer:
 # J-Moshi: Linear warmup → Constant LR
 #
 # 권장: Linear warmup → Cosine decay (더 안정적)
-#   - warmup_steps: 500 (J-Moshi와 동일)
-#   - min_lr: 1e-7 (최종 학습률)
+# - warmup_steps: 500 (J-Moshi와 동일)
+# - min_lr: 1e-7 (최종 학습률)
 # ─────────────────────────────────────────────────────────────────────────────
 
 Scheduler:
@@ -231,12 +231,12 @@ Scheduler:
 # ─────────────────────────────────────────────────────────────────────────────
 #
 # Moshi/J-Moshi 공통:
-#   - PAD token: 50% weight (너무 많은 PAD 학습 방지)
-#   - Semantic:Acoustic = 100:1 (첫 번째 codebook 강조)
+# - PAD token: 50% weight (너무 많은 PAD 학습 방지)
+# - Semantic:Acoustic = 100:1 (첫 번째 codebook 강조)
 #
 # J-Moshi 발견: 일본어에서 PAD 비율 88% (영어 65%)
-#   → 한국어도 비슷할 것으로 예상
-#   → PAD weight 조정 가능성 있음
+# → 한국어도 비슷할 것으로 예상
+# → PAD weight 조정 가능성 있음
 # ─────────────────────────────────────────────────────────────────────────────
 
 Loss:
@@ -255,13 +255,13 @@ Loss:
 # Steps per epoch: 288,889 / 512 ≈ 564 steps
 #
 # J-Moshi: 1 epoch on 60,000h → 8,880 steps
-#   → 60,000 / 0.045 / 512 ≈ 2,604 steps (이론값)
-#   → 실제 8,880 steps = ~3.4 epochs 상당
+# → 60,000 / 0.045 / 512 ≈ 2,604 steps (이론값)
+# → 실제 8,880 steps = ~3.4 epochs 상당
 #
 # K-Moshi 권장:
-#   - 1 epoch: ~565 steps
-#   - 3 epochs: ~1,695 steps
-#   - 5 epochs: ~2,825 steps (권장)
+# - 1 epoch: ~565 steps
+# - 3 epochs: ~1,695 steps
+# - 5 epochs: ~2,825 steps (권장)
 #
 # 더 적은 데이터(13K vs 60K)이므로 더 많은 epoch 필요
 # ─────────────────────────────────────────────────────────────────────────────
@@ -275,15 +275,15 @@ Training:
 # ─────────────────────────────────────────────────────────────────────────────
 #
 # J-Moshi: 8,880 steps in 36 hours on 128x V100
-#   → ~245 steps/hour
-#   → ~14.7 seconds/step
+# → ~245 steps/hour
+# → ~14.7 seconds/step
 #
 # K-Moshi on 32x A100 (estimated):
-#   - A100 vs V100: ~2.5x speedup
-#   - 32 vs 128 GPUs: 0.25x throughput
-#   - Net factor: ~0.6x
-#   → ~147 steps/hour
-#   → ~24.5 seconds/step
+# - A100 vs V100: ~2.5x speedup
+# - 32 vs 128 GPUs: 0.25x throughput
+# - Net factor: ~0.6x
+# → ~147 steps/hour
+# → ~24.5 seconds/step
 #
 # 3,000 steps: ~20 hours
 # 5,000 steps: ~34 hours
@@ -338,12 +338,12 @@ Batch:
 # ─────────────────────────────────────────────────────────────────────────────
 #
 # J-Moshi는 TempFormer와 DepFormer에 다른 학습률 사용:
-#   - TempFormer (main transformer): 2e-6
-#   - DepFormer (depth transformer): 4e-6 (2배)
+# - TempFormer (main transformer): 2e-6
+# - DepFormer (depth transformer): 4e-6 (2배)
 #
 # 이유:
-#   - TempFormer: Pre-trained weights 보존 필요 → 낮은 LR
-#   - DepFormer: 더 적극적인 adaptation 필요 → 높은 LR
+# - TempFormer: Pre-trained weights 보존 필요 → 낮은 LR
+# - DepFormer: 더 적극적인 adaptation 필요 → 높은 LR
 # ─────────────────────────────────────────────────────────────────────────────
 
 Optimizer:
@@ -387,12 +387,12 @@ Data:
 # J-Moshi: batch=16 on 16 GPUs = 1 per GPU
 #
 # K-Moshi: 32 GPUs, 더 큰 effective batch 가능
-#   - batch_size=2, num_microbatches=4
-#   - Effective: 32 × 2 × 4 = 256
+# - batch_size=2, num_microbatches=4
+# - Effective: 32 × 2 × 4 = 256
 #
 # 또는 J-Moshi와 유사하게:
-#   - batch_size=1, num_microbatches=1
-#   - Effective: 32 × 1 × 1 = 32
+# - batch_size=1, num_microbatches=1
+# - Effective: 32 × 1 × 1 = 32
 # ─────────────────────────────────────────────────────────────────────────────
 
 Batch:
@@ -410,14 +410,14 @@ Sequence:
 # J-Moshi의 핵심 발견: TempFormer와 DepFormer에 다른 LR 사용
 #
 # K-Moshi 상황:
-#   - TempFormer: Pre-trained (Moshi 7B) → 보존 필요
-#   - DepFormer: From scratch → 더 적극적 학습
-#   - Text Embedding/Linear: From scratch → 더 적극적 학습
+# - TempFormer: Pre-trained (Moshi 7B) → 보존 필요
+# - DepFormer: From scratch → 더 적극적 학습
+# - Text Embedding/Linear: From scratch → 더 적극적 학습
 #
 # 권장 학습률 비율:
-#   - TempFormer: 1x (base)
-#   - DepFormer: 2x (J-Moshi와 동일)
-#   - Text components: 2-4x (scratch이므로)
+# - TempFormer: 1x (base)
+# - DepFormer: 2x (J-Moshi와 동일)
+# - Text components: 2-4x (scratch이므로)
 # ─────────────────────────────────────────────────────────────────────────────
 
 Optimizer:
@@ -450,14 +450,14 @@ Loss:
 # ─────────────────────────────────────────────────────────────────────────────
 #
 # J-Moshi: 344h → 1,423 steps (3 epochs)
-#   → 344h / 0.045h per sample = ~7,644 samples
-#   → 7,644 / 16 batch = ~478 steps/epoch
-#   → 3 epochs × 478 = 1,434 steps
+# → 344h / 0.045h per sample = ~7,644 samples
+# → 7,644 / 16 batch = ~478 steps/epoch
+# → 3 epochs × 478 = 1,434 steps
 #
 # K-Moshi (500h 가정):
-#   → 500h / 0.045h = ~11,111 samples
-#   → 11,111 / 256 batch = ~43 steps/epoch
-#   → 5 epochs × 43 = ~217 steps
+# → 500h / 0.045h = ~11,111 samples
+# → 11,111 / 256 batch = ~43 steps/epoch
+# → 5 epochs × 43 = ~217 steps
 #
 # 더 많은 학습 권장: 500-1000 steps
 # ─────────────────────────────────────────────────────────────────────────────

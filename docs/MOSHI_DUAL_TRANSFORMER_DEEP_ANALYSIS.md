@@ -112,7 +112,7 @@ def forward_text(self, sequence, sum_condition=None, cross_attention_src=None):
     text_emb = self.text_emb(input_sequence[:, 0])
     input_ = text_emb if input_ is None else input_ + text_emb
 
-    # Step 3: Speaker condition addition ★ 핵심 분석 지점
+    # Step 3: Speaker condition addition  핵심 분석 지점
     if sum_condition is not None:
         input_ = input_ + sum_condition.to(input_)
 
@@ -139,7 +139,7 @@ input_ = text_emb[MOSHI] + Σ audio_emb[USER]
 sum_condition → MOSHI 출력 화자의 speaker embedding
 ```
 
-### 3.3 의미론적 올바름 분석 ⚠️
+### 3.3 의미론적 올바름 분석
 
 **질문**: USER 오디오 + MOSHI 텍스트가 합쳐진 `input_`에 MOSHI speaker embedding을 더하는 것이 올바른가?
 
@@ -229,7 +229,7 @@ def forward_depformer_training(self, sequence, transformer_out):
     depformer_input = torch.stack(depformer_inputs, dim=2)
     depformer_input = depformer_input.view(B * T, Ka, -1)
 
-    # ★ 핵심: 각 timestep이 독립적으로 처리됨 (B*T batch)
+    # 핵심: 각 timestep이 독립적으로 처리됨 (B*T batch)
     depformer_output = self.depformer(depformer_input)
 ```
 
@@ -261,7 +261,7 @@ def forward_depformer(self, depformer_cb_index, sequence, transformer_out):
 
     depformer_input = depformer_input + last_token_input
 
-    # ★ Streaming state 활용: 레이어별 순차 처리
+    # Streaming state 활용: 레이어별 순차 처리
     dep_output = self.depformer(depformer_input)
 
     logits = self.linears[depformer_cb_index](

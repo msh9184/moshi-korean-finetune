@@ -229,10 +229,10 @@ speaker_reference_texts: list[str] | None = None
 ```python
 # Added speaker_conditioning_config parameter
 # Added attributes:
-#   - speaker_conditioning_enabled: bool
-#   - speaker_ref_min_duration_sec: float (default 3.0)
-#   - speaker_ref_max_duration_sec: float (default 10.0)
-#   - speaker_ref_target_sample_rate: int (default 16000)
+# - speaker_conditioning_enabled: bool
+# - speaker_ref_min_duration_sec: float (default 3.0)
+# - speaker_ref_max_duration_sec: float (default 10.0)
+# - speaker_ref_target_sample_rate: int (default 16000)
 ```
 
 **Added `_sample_speaker_reference` method to InterleavedTokenizer** (lines 1397-1521):

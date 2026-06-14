@@ -58,11 +58,11 @@ git clone https://github.com/kyutai-labs/moshi && cd moshi
 
 # 2) Apply this overlay (see rust-overlay/PATCH.md for the core edits)
 cp -r <this-repo>/serving/rust-overlay/moshi-core/src/*.rs rust/moshi-core/src/
-#    then apply the wiring edits described in rust-overlay/PATCH.md
+# then apply the wiring edits described in rust-overlay/PATCH.md
 
 # 3) Fuse the LoRA adapter from training into a Rust-loadable checkpoint, then serve
 bash <this-repo>/serving/scripts/serve_korean_moshi.sh /path/to/lora.safetensors
-#    (edit the BASE_MODEL / MIMI_MODEL / TOKENIZER placeholders at the top first)
+# (edit the BASE_MODEL / MIMI_MODEL / TOKENIZER placeholders at the top first)
 
 # 4) Open the served web client in the browser (https://localhost:8998)
 ```

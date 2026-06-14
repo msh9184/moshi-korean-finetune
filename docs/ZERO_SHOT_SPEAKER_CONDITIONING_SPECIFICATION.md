@@ -1050,7 +1050,7 @@ depformer_output = self.depformer(
 
 ## 6. 구현 계획 (Implementation Roadmap)
 
-### Phase 1: Speaker Encoder Integration (Week 1-2) ✅ **COMPLETED**
+### Phase 1: Speaker Encoder Integration (Week 1-2)  **COMPLETED**
 
 | Task | 세부 내용 | 산출물 | 상태 |
 |------|----------|--------|------|

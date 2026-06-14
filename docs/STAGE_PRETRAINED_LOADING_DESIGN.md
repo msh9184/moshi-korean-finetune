@@ -92,17 +92,17 @@ class PretrainedModelArgs(Serializable):
 
     # Path to safetensors file from previous stage
     # Supports:
-    #   - Absolute path: "/path/to/checkpoint.safetensors"
-    #   - Relative to run_dir: "checkpoints/checkpoint.best.safetensors"
-    #   - "best" or "last" keywords: Auto-find in specified checkpoint_dir
+    # - Absolute path: "/path/to/checkpoint.safetensors"
+    # - Relative to run_dir: "checkpoints/checkpoint.best.safetensors"
+    # - "best" or "last" keywords: Auto-find in specified checkpoint_dir
     path: str | None = None
 
     # Directory containing checkpoints (for "best"/"last" keywords)
     checkpoint_dir: str | None = None
 
     # Strict loading mode:
-    #   - True: Error on missing keys (except expected new modules)
-    #   - False: Warning only, continue with partial loading
+    # - True: Error on missing keys (except expected new modules)
+    # - False: Warning only, continue with partial loading
     strict: bool = False
 
     # List of module prefixes expected to be newly initialized

@@ -204,12 +204,12 @@ git clone https://huggingface.co/Supertone/supertonic-2 ./supertonic-2
 ls -la supertonic-2/
 # 예상 결과:
 # assets/
-#   ├── models/
-#   │   ├── encoder.onnx
-#   │   ├── decoder.onnx
-#   │   └── vocoder.onnx
-#   ├── configs/
-#   └── speakers/
+# ├── models/
+# │   ├── encoder.onnx
+# │   ├── decoder.onnx
+# │   └── vocoder.onnx
+# ├── configs/
+# └── speakers/
 
 # 3. GPU 서버로 전송
 rsync -avz --progress ./supertonic-2/ \

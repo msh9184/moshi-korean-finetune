@@ -33,7 +33,7 @@ def forward_text(
     text_emb = self.text_emb(input_sequence[:, 0])
     input_ = text_emb if input_ is None else input_ + text_emb
 
-    # 3. ⭐ sum_condition 주입 (핵심!)
+    # 3.  sum_condition 주입 (핵심!)
     if sum_condition is not None:
         input_ = input_ + sum_condition.to(input_)
 

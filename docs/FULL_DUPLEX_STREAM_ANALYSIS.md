@@ -198,7 +198,7 @@ def tempformer_forward(moshi_lm: MoshiForFinetuning, batch: Batch):
     tempformer_input = text_emb + audio_emb  # 16개 모두 포함!
 ```
 
-### 3.3 K-Moshi (`finetune/backbone/lm_model_wrapper.py`) - 🚨 버그
+### 3.3 K-Moshi (`finetune/backbone/lm_model_wrapper.py`) -  버그
 
 ```python
 # Line 564-577: num_audio_embs = dep_q (not n_q!)

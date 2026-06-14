@@ -905,10 +905,10 @@ alignments = aligner.align_audio_text(
 
 # 결과 형식 (to_moshi_format)
 # [
-#   ["안녕하세요", [0.0, 0.52], "SPEAKER_MAIN"],
-#   ["오늘", [0.56, 0.78], "SPEAKER_MAIN"],
-#   ["날씨가", [0.82, 1.15], "SPEAKER_MAIN"],
-#   ["좋네요", [1.18, 1.52], "SPEAKER_MAIN"],
+# ["안녕하세요", [0.0, 0.52], "SPEAKER_MAIN"],
+# ["오늘", [0.56, 0.78], "SPEAKER_MAIN"],
+# ["날씨가", [0.82, 1.15], "SPEAKER_MAIN"],
+# ["좋네요", [1.18, 1.52], "SPEAKER_MAIN"],
 # ]
 ```
 
